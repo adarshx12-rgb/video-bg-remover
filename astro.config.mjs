@@ -28,7 +28,7 @@ export default defineConfig({
         '@tensorflow/tfjs-backend-webgl',
         '@tensorflow/tfjs-backend-webgpu',
       ],
-      exclude: ['@huggingface/transformers', 'onnxruntime-web'],
+      exclude: ['@huggingface/transformers', 'onnxruntime-web', 'onnxruntime-web/webgpu'],
     },
   },
 });

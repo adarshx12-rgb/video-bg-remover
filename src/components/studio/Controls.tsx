@@ -38,6 +38,7 @@ export function ModelPicker(props: { value: ModelId; onChange(id: ModelId): void
               <span className="model-description">{model.description}</span>
               <span className="model-meta">
                 {model.shortLabel}, {model.approxDownload} download
+                {model.attribution && <>. {model.attribution}</>}
               </span>
               {selected && status.status === 'ready' && (
                 <span className="model-ready">Ready, running on {status.backend}</span>

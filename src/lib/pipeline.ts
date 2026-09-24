@@ -16,6 +16,8 @@ import {
 } from 'mediabunny';
 import { FORMAT_OPTIONS } from './capabilities';
 import { Compositor, type BackgroundSpec } from './compositing/compositor';
+import { MattePackWriter } from './compositing/mattePack';
+import { primeVp9DecodeWorkaround } from './video/decoderWorkaround';
 import type { MattingAdapter } from './models/types';
 import type { AudioOutcome, JobSettings, JobStats } from '../worker/protocol';
 
@@ -54,7 +56,8 @@ export async function processVideo(
   settings: JobSettings,
   token: CancelToken,
   callbacks: ProcessCallbacks,
-): Promise<{ buffer: ArrayBuffer; mimeType: string; stats: JobStats }> {
+  options: { recordMatte?: boolean } = {},
+): Promise<{ buffer: ArrayBuffer; mimeType: string; stats: JobStats; matte: { buffer: ArrayBuffer; mimeType: string } | null }> {
   const formatInfo = FORMAT_OPTIONS[settings.format];
   const isMp4 = formatInfo.extension === 'mp4';
   const videoCodec: VideoCodec = isMp4 ? 'avc' : 'vp9';
@@ -73,9 +76,13 @@ export async function processVideo(
   for (const key of Object.keys(adapter.stageTimings)) delete adapter.stageTimings[key];
   adapter.resetState(); // new video / restart: RVM recurrent state must not leak across jobs
   let conversion: Conversion | null = null;
+  // Recording the cut-out is optional: if it can't be created or fails, the export still succeeds.
+  let pack = options.recordMatte ? await MattePackWriter.create(width, height).catch(() => null) : null;
 
   try {
     const duration = await input.computeDuration();
+    const videoTrack = await input.getPrimaryVideoTrack();
+    if (videoTrack) await primeVp9DecodeWorkaround(await videoTrack.getDecoderConfig());
     const inputAudio = await input.getPrimaryAudioTrack();
 
     let frames = 0;
@@ -94,11 +101,20 @@ export async function processVideo(
       if (lastReturn >= 0) decodeWaitMs += t0 - lastReturn;
       frameCtx.globalCompositeOperation = 'copy';
       sample.draw(frameCtx, 0, 0, width, height);
-      const matte = await adapter.process(frameCanvas);
+      const matte = await adapter.process(frameCanvas, sample.timestamp);
       if (token.cancelled) throw new JobCancelledError();
       const tc = performance.now();
       const composed = compositor.compose(frameCanvas, matte);
       composeMs += performance.now() - tc;
+      if (pack) {
+        try {
+          await pack.add(frameCanvas, matte, sample.timestamp, sample.duration);
+        } catch (error) {
+          console.warn('Could not save the cut-out; changing the background later will need a full run.', error);
+          void pack.cancel();
+          pack = null;
+        }
+      }
       frames++;
       inferenceMs += performance.now() - t0;
 
@@ -171,8 +187,17 @@ export async function processVideo(
 
     const buffer = output.target.buffer;
     if (!buffer) throw new Error('The encoder produced no output.');
+    let matte: { buffer: ArrayBuffer; mimeType: string } | null = null;
+    if (pack) {
+      matte = await pack.finish().catch((error) => {
+        console.warn('Could not finish the saved cut-out.', error);
+        return null;
+      });
+      pack = null;
+    }
     return {
       buffer,
+      matte,
       mimeType: formatInfo.mimeType,
       stats: {
         frames,
@@ -194,6 +219,7 @@ export async function processVideo(
     throw error;
   } finally {
     token.onCancel = undefined;
+    if (pack) void pack.cancel();
     adapter.resetState();
     compositor.dispose();
     input.dispose();
@@ -222,6 +248,7 @@ export async function previewFrame(
   try {
     const track = await input.getPrimaryVideoTrack();
     if (!track) throw new Error('This file has no video track.');
+    await primeVp9DecodeWorkaround(await track.getDecoderConfig());
     const sink = new CanvasSink(track, { width, height, fit: 'fill', poolSize: 1 });
     const start = adapter.isTemporal ? Math.max(0, timeSeconds - 0.5) : timeSeconds;
     let composed: OffscreenCanvas | null = null;
@@ -231,7 +258,7 @@ export async function previewFrame(
       if (token.cancelled) throw new JobCancelledError();
       frameCtx.globalCompositeOperation = 'copy';
       frameCtx.drawImage(wrapped.canvas, 0, 0, width, height);
-      const matte = await adapter.process(frameCanvas);
+      const matte = await adapter.process(frameCanvas, wrapped.timestamp);
       composed = compositor.compose(frameCanvas, matte);
       count++;
     }

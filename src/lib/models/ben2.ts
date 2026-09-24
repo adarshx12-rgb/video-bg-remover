@@ -1,5 +1,6 @@
 import { env, pipeline, RawImage, type BackgroundRemovalPipeline, type ProgressCallback, type ProgressInfo } from '@huggingface/transformers';
 import { BEN2_MODEL } from '../../config';
+import { GpuBackendError } from './errors';
 import { installOrtShaderFix } from './ortShaderFix';
 import type { AdapterOptions, DownloadProgress, MatteResult, MattingAdapter } from './types';
 
@@ -119,13 +120,6 @@ export class Ben2Adapter implements MattingAdapter {
     await this.segmenter?.dispose();
     this.segmenter = null;
     this.maskCanvas = null;
-  }
-}
-
-export class GpuBackendError extends Error {
-  constructor(detail: string) {
-    super(detail);
-    this.name = 'GpuBackendError';
   }
 }
 

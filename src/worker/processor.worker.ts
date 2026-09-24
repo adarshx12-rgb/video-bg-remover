@@ -1,6 +1,8 @@
 /// <reference lib="webworker" />
 import type { ModelId } from '../config';
+import { SavedMatteAdapter } from '../lib/models/savedMatte';
 import type { MattingAdapter } from '../lib/models/types';
+import { installVp9DecodeWorkaround } from '../lib/video/decoderWorkaround';
 import { JobCancelledError, previewFrame, processVideo, type CancelToken } from '../lib/pipeline';
 import type { BackgroundMessage, FromWorker, ToWorker } from './protocol';
 
@@ -9,6 +11,7 @@ import type { BackgroundMessage, FromWorker, ToWorker } from './protocol';
  * is the most reliable way to release all GPU, WASM and tensor memory.
  */
 const scope = self as unknown as DedicatedWorkerGlobalScope;
+installVp9DecodeWorkaround();
 
 let adapter: MattingAdapter | null = null;
 let loading: Promise<MattingAdapter> | null = null;
@@ -27,12 +30,25 @@ function post(message: FromWorker, transfer: Transferable[] = []) {
 
 async function createAdapter(model: ModelId, backendOverride?: string): Promise<MattingAdapter> {
   // Dynamic imports: only the selected model's runtime (TF.js or ONNX Runtime) is loaded.
-  if (model === 'rvm') {
-    const { RvmAdapter } = await import('../lib/models/rvm');
-    return new RvmAdapter({ backendOverride });
+  switch (model) {
+    case 'rvm': {
+      const { RvmAdapter } = await import('../lib/models/rvm');
+      return new RvmAdapter({ backendOverride });
+    }
+    case 'withoutbg': {
+      const { WithoutbgAdapter } = await import('../lib/models/withoutbg');
+      return new WithoutbgAdapter({ backendOverride });
+    }
+    case 'ben2': {
+      const { Ben2Adapter } = await import('../lib/models/ben2');
+      return new Ben2Adapter({ backendOverride });
+    }
+    default: {
+      // Exhaustiveness check: never silently fall back to a different model.
+      const unknown: never = model;
+      throw new Error(`Unknown model: ${String(unknown)}`);
+    }
   }
-  const { Ben2Adapter } = await import('../lib/models/ben2');
-  return new Ben2Adapter({ backendOverride });
 }
 
 async function load(model: ModelId, backendOverride?: string) {
@@ -82,12 +98,8 @@ scope.onmessage = async (event: MessageEvent<ToWorker>) => {
       try {
         if (token.cancelled) throw new JobCancelledError();
         const model = await requireAdapter();
-        const result = await processVideo(message.file, model, message.settings, token, {
-          onPhase: (phase) => post({ type: 'phase', jobId, phase }),
-          onProgress: (fraction, framesDone, msPerFrame) => post({ type: 'progress', jobId, fraction, framesDone, msPerFrame }),
-          onPreview: (bitmap) => post({ type: 'preview', jobId, bitmap }, [bitmap]),
-        });
-        post({ type: 'done', jobId, buffer: result.buffer, mimeType: result.mimeType, stats: result.stats }, [result.buffer]);
+        const result = await processVideo(message.file, model, message.settings, token, jobCallbacks(jobId), { recordMatte: true });
+        post({ type: 'done', jobId, buffer: result.buffer, mimeType: result.mimeType, stats: result.stats, matte: result.matte }, transfersOf(result));
       } catch (error) {
         if (error instanceof JobCancelledError || token.cancelled) post({ type: 'cancelled', jobId });
         else post({ type: 'error', jobId, message: errorMessage(error) });
@@ -95,6 +107,30 @@ scope.onmessage = async (event: MessageEvent<ToWorker>) => {
         tokens.delete(jobId);
         closeBackground(message.settings.background);
       }
+      });
+      break;
+    }
+
+    case 'reapply': {
+      const { jobId } = message;
+      const token: CancelToken = { cancelled: false };
+      tokens.set(jobId, token);
+      await enqueue(async () => {
+        // A separate, model-free adapter: works even if no model is loaded in this worker.
+        const saved = new SavedMatteAdapter(message.model, message.matte);
+        try {
+          if (token.cancelled) throw new JobCancelledError();
+          await saved.load();
+          const result = await processVideo(message.file, saved, message.settings, token, jobCallbacks(jobId));
+          post({ type: 'done', jobId, buffer: result.buffer, mimeType: result.mimeType, stats: result.stats, matte: null }, [result.buffer]);
+        } catch (error) {
+          if (error instanceof JobCancelledError || token.cancelled) post({ type: 'cancelled', jobId });
+          else post({ type: 'error', jobId, message: errorMessage(error) });
+        } finally {
+          await saved.dispose();
+          tokens.delete(jobId);
+          closeBackground(message.settings.background);
+        }
       });
       break;
     }
@@ -121,6 +157,19 @@ scope.onmessage = async (event: MessageEvent<ToWorker>) => {
     }
   }
 };
+
+function jobCallbacks(jobId: number) {
+  return {
+    onPhase: (phase: 'processing' | 'finalizing') => post({ type: 'phase', jobId, phase }),
+    onProgress: (fraction: number, framesDone: number, msPerFrame: number) =>
+      post({ type: 'progress', jobId, fraction, framesDone, msPerFrame }),
+    onPreview: (bitmap: ImageBitmap) => post({ type: 'preview', jobId, bitmap }, [bitmap]),
+  };
+}
+
+function transfersOf(result: { buffer: ArrayBuffer; matte: { buffer: ArrayBuffer } | null }): Transferable[] {
+  return result.matte ? [result.buffer, result.matte.buffer] : [result.buffer];
+}
 
 function closeBackground(bg: BackgroundMessage) {
   if (bg.kind === 'image') bg.image.close();

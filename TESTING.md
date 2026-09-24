@@ -12,6 +12,8 @@ npm run make-test-videos      # needs ffmpeg + ffprobe on PATH
 npm run build && npm run preview   # or: npm run dev
 npm run e2e                   # RVM scenarios (~15 min on the test machine)
 E2E_BEN2=1 node tests/e2e/run-e2e.mjs ben2   # BEN2 scenario (slow; downloads 219 MB once)
+E2E_WITHOUTBG=1 node tests/e2e/run-e2e.mjs withoutbg   # withoutBG (downloads 455 MB once)
+# Everything: E2E_BEN2=1 E2E_WITHOUTBG=1 npm run e2e   (APP_URL=... to target another port)
 npm test && npm run typecheck
 ```
 
@@ -24,17 +26,19 @@ audio/video offset.
 
 ## Automated results (production build via `astro preview`)
 
-The final run of the whole suite, `E2E_BEN2=1 npm run e2e`, passed 12/12 checks in one go.
+The final run of the whole suite, `E2E_BEN2=1 E2E_WITHOUTBG=1 npm run e2e`, passed
+**14/14** checks in one go (three models, background replacement, and all scenarios below).
 
 | Scenario | Result | Evidence |
 | --- | --- | --- |
 | Type check (`tsc -b`) and production build (`astro build`) | Pass | |
-| Unit tests (sizing, RVM ratio, shader workaround) | Pass (9/9) | `tests/unit` |
+| Unit tests (sizing, RVM ratio, shader workaround, VP9 decode rule, matte pack size) | Pass (12/12) | `tests/unit` |
 | People (RVM): 6 s 1280×720 H.264+AAC → MP4, green background | Pass | 180/180 frames, per-frame timestamps identical (max delta 0.00 ms), duration 6.000 s, AAC copied, audio start 0.000 s |
 | RVM: silent 960×540 → WebM, local image background | Pass | No audio track in output, timestamps identical |
 | RVM: portrait phone video (stored 1280×720 + 90° rotation) → transparent WebM | Pass | Output 720×1280 upright, no rotation metadata, `alpha_mode=1`, alpha plane decoded with libvpx: 19% transparent, 77% opaque |
 | RVM: audio starting 0.48 s after video → MP4 | Pass | Audio start 0.479 s in both, offset delta 0.0 ms |
 | RVM: reduced frame rate (10 fps) → MP4 | Pass | 60 frames for 6 s, duration and audio kept |
+| **Replace background after the video is made** (green full run → black → model unloaded → green → transparent) | Pass | Re-applies took 6 s, 7 s and 8 s vs ~90 s for the full run; 180/180 timestamps exact; **zero** model-file requests after the model was unloaded; green re-apply vs original green run **46.8 dB PSNR**; transparent re-apply has a real alpha plane (28% transparent) |
 | Cancel while processing, then Try again | Pass | "Stopped" state, no download offered, no stale updates after 3 s; retry completes |
 | Model switching | Pass | Worker count dropped from 1 to 0 when switching (previous model released); People reloads only when used |
 | Too-long video (35 s) | Pass | Rejected with "Trim the video to 30 seconds or less" |
@@ -49,6 +53,8 @@ The final run of the whole suite, `E2E_BEN2=1 npm run e2e`, passed 12/12 checks 
 | --- | --- | --- |
 | BEN2 on WebGPU through the pipeline harness: 1 s VP9+Opus WebM → MP4 at 5 fps | Pass | 5 frames, duration 1.024 s vs 1.021 s, Opus transcoded to AAC, audio start 0.000 s |
 | General subjects (BEN2) through the UI: 1 s VP9+Opus WebM → MP4, black background, 5 fps | Pass | Ran on WebGPU; 5 frames; duration 1.024 s vs 1.021 s; Opus → AAC; audio start 0.000 s; network: only `localhost`, `huggingface.co`, `us.aws.cdn.hf.co`, all GET |
+| **Any subject (withoutBG) through the UI:** 1 s VP9 854×480 + Opus → WebM, full frame rate | Pass | WebGPU; 30/30 timestamps exact; Opus copied; "Built with DINOv3" shown; also exercises the VP9 software-decode workaround (854 is not a multiple of 16) |
+| withoutBG vs BEN2 masks on the same images (evaluation before integrating) | Close agreement | Portrait: IoU 0.985, mean difference 3.0/255; cats: IoU 0.954, 4.5/255. Visually: BEN2 keeps crisper hair strands; withoutBG kept a TV remote lying on a cat and clipped a tail tip that BEN2 kept |
 | BEN2 WebGPU mask vs CPU (WASM) mask on the same image | Match | Mean difference 0.32/255; 0.03% of pixels changed foreground/background classification |
 | BEN2 automatic CPU fallback when WebGPU fails | Pass | Before the shader workaround, WebGPU failed, the worker restarted on WASM and the UI note was produced |
 
@@ -58,12 +64,22 @@ The final run of the whole suite, `E2E_BEN2=1 npm run e2e`, passed 12/12 checks 
 | --- | --- | --- |
 | RVM, WebGPU | 1280×720 | ~0.49–0.52 s |
 | RVM, WebGL | 1280×720 | ~1.43 s |
+| withoutBG, WebGPU | any (model input is 448×448) | ~4.2–4.5 s |
 | BEN2, WebGPU (with shader workaround) | any (model input is 1024×1024) | ~28–39 s |
 | BEN2, WASM (CPU, 4 threads) | any | ~47 s |
 
 Decoding, compositing and encoding add under 20 ms per frame.
 
 ## Issues found and fixed during testing
+
+- **Chrome hardware VP9 decoding corrupted frames on this machine** when the coded size
+  was not a multiple of 16: a 960×540 VP9 source came out with green-tinted top rows.
+  Isolated with raw WebCodecs: hardware decoding gave RGB 51/92/58 for the top rows, software
+  decoding 58/51/45 (matching ffmpeg). Fixed by switching only those VP9 streams to
+  software decoding. After the fix, a VP9 540p source and an H.264 source with the same
+  content produced matching output (31.6/49.7/29.6 vs 31.3/49.8/30.6). It was found because
+  the matte pack (1920×540 VP9) showed a green band after **Apply new background**; the
+  pack is now also padded to multiples of 16.
 
 - **Race: a late model-download progress event could replace a finished result** (and
   revoke its file URL). Progress updates now only apply while a model is loading.
@@ -97,18 +113,24 @@ Decoding, compositing and encoding add under 20 ms per frame.
 3. **BEN2 tab crashes.** Long BEN2 GPU workloads intermittently crashed the tab on the
    test machine (the Chrome log showed "GPU state invalid", consistent with a Windows GPU
    timeout reset). Check whether this happens on stronger GPUs.
-4. **Real phone footage.** The portrait test used ffmpeg-generated rotation metadata.
+4. **Background replacement on long clips.** The saved cut-out stays in memory (about
+   3 MB for 4 s at 960×540). Check memory with a full 30 s, 1280 px clip.
+5. **Real phone footage.** The portrait test used ffmpeg-generated rotation metadata.
    Try a real iPhone (HEVC/MOV) and Android clip. HEVC decoding depends on the OS and
    hardware.
-5. **Clicking Download in a normal browser window** (the automated suite reads the
+6. **Clicking Download in a normal browser window** (the automated suite reads the
    linked file directly; see above). Confirm the file saves with a sensible name and plays.
-6. **Audio sync by ear.** The test clips beep once per second. Play
+7. **Audio sync by ear.** The test clips beep once per second. Play
    `test-results/e2e/rvm-person-audio.mp4` in VLC or a browser and confirm the beeps line
    up with the originals. Timestamps were verified numerically, but listening was not.
-7. **Downloaded files in other players.** MP4 in QuickTime or Windows Media Player;
+8. **Downloaded files in other players.** MP4 in QuickTime or Windows Media Player;
    transparent WebM in a video editor (for example DaVinci Resolve or Premiere with WebM
    support) to confirm the alpha channel is imported.
-8. **Screen reader pass** (NVDA or VoiceOver) through the whole flow. Keyboard use of the
+9. **Screen reader pass** (NVDA or VoiceOver) through the whole flow. Keyboard use of the
    comparison divider was checked with a screenshot, not with assistive technology.
-9. **Very low memory devices / 30 s at 1280 px.** Only clips up to 6 s were processed.
+10. **withoutBG on other hardware / CPU only.** Only WebGPU on one Intel iGPU was
+   measured; the WASM (CPU) fallback path for withoutBG was not timed.
+11. **VP9 hardware decoding on other GPUs.** The workaround is based on one GPU/driver.
+   It only switches affected VP9 sizes to software decoding, which is correct but slower.
+12. **Very low memory devices / 30 s at 1280 px.** Only clips up to 6 s were processed.
    Check a full 30 s, 1080p source to confirm the provisional limits are workable.

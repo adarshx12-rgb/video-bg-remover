@@ -17,6 +17,12 @@ interface LoadedFile {
   meta: VideoMetadata;
 }
 
+interface SavedMatte {
+  blob: Blob;
+  model: ModelId;
+  frameRate: number | null;
+}
+
 type PreviewState =
   | { status: 'idle' }
   | { status: 'working' }
@@ -43,6 +49,9 @@ export default function Studio() {
   const [job, setJob] = useState<JobState>({ status: 'idle' });
   const [preview, setPreview] = useState<PreviewState>({ status: 'idle' });
   const [resultKind, setResultKind] = useState<'none' | 'canvas' | 'video'>('none');
+  /** Cut-out saved by the last full run, so the background can be replaced without the model. */
+  const [savedMatte, setSavedMatte] = useState<SavedMatte | null>(null);
+  const lastMode = useRef<'full' | 'reapply'>('full');
   const [view, setView] = useState<StageView>('original');
 
   const originalRef = useRef<HTMLVideoElement>(null);
@@ -135,6 +144,7 @@ export default function Studio() {
       try {
         const meta = await probeVideo(file);
         resetResult();
+        setSavedMatte(null);
         setFrameRate(null);
         setLoaded({ file, url: URL.createObjectURL(file), meta });
       } catch (error) {
@@ -149,6 +159,7 @@ export default function Studio() {
   const chooseAnother = useCallback(async () => {
     await stopActive();
     resetResult();
+    setSavedMatte(null);
     setLoaded(null);
     setFileError(null);
   }, [resetResult, stopActive]);
@@ -209,65 +220,84 @@ export default function Studio() {
     [background, format, frameRate, loaded, softness],
   );
 
-  const start = useCallback(async () => {
-    if (!loaded) return;
-    await stopActive();
-    if (!(await ensureModel())) return;
-    let settings: JobSettings;
-    try {
-      settings = await buildSettings(false);
-    } catch (error) {
-      setJob({ status: 'error', error: toFriendlyError(error, 'process') });
-      return;
-    }
-    const fps = frameRate ?? loaded.meta.frameRate ?? 30;
-    const totalFrames = Math.max(1, Math.round(loaded.meta.durationSeconds * fps));
-    const key = settingsKey;
-    setJob({ status: 'processing', phase: 'processing', fraction: 0, framesDone: 0, msPerFrame: 0, totalFrames });
-    setPreview({ status: 'idle' });
-    originalRef.current?.pause();
+  /**
+   * 'full' runs the AI model and saves the cut-out; 'reapply' re-composites from the
+   * saved cut-out (new background, softness or file type) without running the model.
+   */
+  const runExport = useCallback(
+    async (mode: 'full' | 'reapply') => {
+      if (!loaded) return;
+      const saved = savedMatte;
+      if (mode === 'reapply' && !saved) return;
+      lastMode.current = mode;
+      await stopActive();
+      if (mode === 'full' && !(await ensureModel())) return;
+      let settings: JobSettings;
+      try {
+        settings = await buildSettings(false);
+      } catch (error) {
+        setJob({ status: 'error', error: toFriendlyError(error, 'process') });
+        return;
+      }
+      const fps = frameRate ?? loaded.meta.frameRate ?? 30;
+      const totalFrames = Math.max(1, Math.round(loaded.meta.durationSeconds * fps));
+      const key = settingsKey;
+      const runModel = modelId;
+      setJob({ status: 'processing', mode, phase: 'processing', fraction: 0, framesDone: 0, msPerFrame: 0, totalFrames });
+      setPreview({ status: 'idle' });
+      originalRef.current?.pause();
 
-    const { jobId, result } = client.process(loaded.file, settings, {
-      onPhase: (phase) => setJob((j) => (j.status === 'processing' ? { ...j, phase } : j)),
-      onProgress: (fraction, framesDone, msPerFrame) =>
-        setJob((j) => (j.status === 'processing' ? { ...j, fraction, framesDone, msPerFrame } : j)),
-      onPreview: (bitmap) => {
-        drawToCanvas(bitmap);
-        setResultKind((k) => (k === 'none' ? 'canvas' : k));
-        setView((v) => (v === 'original' ? 'result' : v));
-      },
-    });
-    activeJob.current = jobId;
-    setResultKind('canvas');
-    setView('result');
-    try {
-      const { blob, stats } = await result;
-      if (activeJob.current !== jobId) return;
-      activeJob.current = null;
-      const info = FORMAT_OPTIONS[settings.format];
-      const base = loaded.file.name.replace(/\.[^.]+$/, '') || 'video';
-      doneKey.current = key;
-      setJob({
-        status: 'done',
-        url: URL.createObjectURL(blob),
-        fileName: `${base}-${info.transparent ? 'transparent' : 'new-background'}.${info.extension}`,
-        size: blob.size,
-        stats,
-        formatLabel: info.label,
-        stale: false,
-      });
-      setResultKind('video');
+      const handlers = {
+        onPhase: (phase: 'processing' | 'finalizing') => setJob((j) => (j.status === 'processing' ? { ...j, phase } : j)),
+        onProgress: (fraction: number, framesDone: number, msPerFrame: number) =>
+          setJob((j) => (j.status === 'processing' ? { ...j, fraction, framesDone, msPerFrame } : j)),
+        onPreview: (bitmap: ImageBitmap) => {
+          drawToCanvas(bitmap);
+          setResultKind((k) => (k === 'none' ? 'canvas' : k));
+          setView((v) => (v === 'original' ? 'result' : v));
+        },
+      };
+      const { jobId, result } =
+        mode === 'reapply' && saved
+          ? client.reapply(loaded.file, saved.blob, saved.model, settings, handlers)
+          : client.process(loaded.file, settings, handlers);
+      activeJob.current = jobId;
+      setResultKind('canvas');
       setView('result');
-      requestAnimationFrame(() => downloadRef.current?.focus());
-    } catch (error) {
-      if (activeJob.current !== jobId && !(error instanceof CancelledError)) return;
-      activeJob.current = null;
-      if (error instanceof CancelledError) setJob({ status: 'cancelled' });
-      else setJob({ status: 'error', error: toFriendlyError(error, 'process') });
-      setResultKind('none');
-      setView('original');
-    }
-  }, [buildSettings, client, drawToCanvas, ensureModel, frameRate, loaded, settingsKey, stopActive]);
+      try {
+        const { blob, stats, matte } = await result;
+        if (activeJob.current !== jobId) return;
+        activeJob.current = null;
+        if (mode === 'full') setSavedMatte(matte ? { blob: matte, model: runModel, frameRate } : null);
+        const info = FORMAT_OPTIONS[settings.format];
+        const base = loaded.file.name.replace(/.[^.]+$/, '') || 'video';
+        doneKey.current = key;
+        setJob({
+          status: 'done',
+          mode,
+          url: URL.createObjectURL(blob),
+          fileName: `${base}-${info.transparent ? 'transparent' : 'new-background'}.${info.extension}`,
+          size: blob.size,
+          stats,
+          formatLabel: info.label,
+          stale: false,
+        });
+        setResultKind('video');
+        setView('result');
+        requestAnimationFrame(() => downloadRef.current?.focus());
+      } catch (error) {
+        if (activeJob.current !== jobId && !(error instanceof CancelledError)) return;
+        activeJob.current = null;
+        if (error instanceof CancelledError) setJob({ status: 'cancelled' });
+        else setJob({ status: 'error', error: toFriendlyError(error, 'process') });
+        setResultKind('none');
+        setView('original');
+      }
+    },
+    [buildSettings, client, drawToCanvas, ensureModel, frameRate, loaded, modelId, savedMatte, settingsKey, stopActive],
+  );
+  const start = useCallback(() => runExport('full'), [runExport]);
+  const applyNewBackground = useCallback(() => runExport('reapply'), [runExport]);
 
   const cancel = useCallback(async () => {
     if (job.status === 'loading-model') {
@@ -323,6 +353,17 @@ export default function Studio() {
   const transparentExportable = !!caps?.outputFormats.some((f) => f.transparent);
   const canStart = !!loaded && !!caps && !unsupported && formats.some((f) => f.id === format) && !locked;
   const meta = loaded?.meta;
+  // The saved cut-out stays valid while the model and frame rate are unchanged.
+  const canReapply = canStart && !!savedMatte && savedMatte.model === modelId && savedMatte.frameRate === frameRate;
+  const staleDone = job.status === 'done' && job.stale;
+  const staleNote = !staleDone
+    ? undefined
+    : canReapply
+      ? 'Your cut-out is saved, so the new background, edge softness or file type can be applied without running the AI again.'
+      : savedMatte
+        ? 'Changing the model or frame rate needs the AI to run again. Select Remove background again.'
+        : 'Select Remove background again to apply the new settings.';
+  const retry = lastMode.current === 'reapply' && canReapply ? applyNewBackground : start;
   const estimate =
     preview.status === 'ready' && meta
       ? preview.msPerFrame * Math.round(meta.durationSeconds * (frameRate ?? meta.frameRate ?? 30))
@@ -446,7 +487,12 @@ export default function Studio() {
           />
 
           <div className="actions">
-            <StatusPanel job={job} />
+            <StatusPanel job={job} staleNote={staleNote} />
+            {job.status === 'done' && !job.stale && savedMatte && (
+              <p className="inline-hint">
+                Want a different background? Choose one above. Your cut-out is saved, so the AI doesn’t need to run again.
+              </p>
+            )}
             {preview.status === 'working' && (
               <p className="status-detail" role="status">
                 Making a preview of this frame…
@@ -457,12 +503,21 @@ export default function Studio() {
               <button type="button" className="button button-secondary button-large" onClick={cancel} disabled={job.status === 'cancelling'}>
                 Cancel
               </button>
+            ) : job.status === 'done' && staleDone && canReapply ? (
+              <>
+                <button type="button" className="button button-primary button-large" onClick={applyNewBackground}>
+                  Apply new background
+                </button>
+                <a ref={downloadRef} className="button button-secondary" href={job.url} download={job.fileName}>
+                  Download previous version
+                </a>
+              </>
             ) : job.status === 'done' ? (
               <a ref={downloadRef} className="button button-primary button-large" href={job.url} download={job.fileName}>
                 Download {job.fileName.endsWith('.mp4') ? 'MP4' : 'WebM'}
               </a>
             ) : job.status === 'error' || job.status === 'cancelled' ? (
-              <button type="button" className="button button-primary button-large" onClick={start} disabled={!canStart}>
+              <button type="button" className="button button-primary button-large" onClick={retry} disabled={!canStart}>
                 Try again
               </button>
             ) : (

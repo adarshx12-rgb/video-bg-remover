@@ -16,7 +16,11 @@ export interface JobHandlers {
 export interface JobResult {
   blob: Blob;
   stats: JobStats;
+  /** Saved cut-out for replacing the background later without the model; null if unavailable. */
+  matte: Blob | null;
 }
+
+type DonePayload = { buffer: ArrayBuffer; mimeType: string; stats: JobStats; matte: { buffer: ArrayBuffer; mimeType: string } | null };
 
 type Pending = {
   resolve(value: unknown): void;
@@ -79,13 +83,7 @@ export class ProcessorClient {
   private spawn(model: ModelId, onProgress: (p: DownloadProgress) => void, backendOverride?: string): Promise<LoadedModel> {
     this.terminate();
     this.model = model;
-    const worker = new Worker(new URL('../worker/processor.worker.ts', import.meta.url), { type: 'module', name: `matting-${model}` });
-    this.worker = worker;
-    worker.onmessage = (event: MessageEvent<FromWorker>) => this.handleMessage(event.data);
-    worker.onerror = (event) => {
-      event.preventDefault();
-      this.failEverything(new Error(`The processing worker crashed: ${event.message || 'unknown error'}. Select the model again to retry.`));
-    };
+    const worker = this.createWorker(`matting-${model}`);
     const promise = new Promise<LoadedModel>((resolve, reject) => {
       this.loadHandlers = { resolve, reject, onProgress };
     });
@@ -99,11 +97,32 @@ export class ProcessorClient {
 
   process(file: File, settings: JobSettings, handlers: JobHandlers): { jobId: number; result: Promise<JobResult> } {
     const jobId = this.nextJobId++;
-    const result = this.startJob<{ buffer: ArrayBuffer; mimeType: string; stats: JobStats }>(jobId, handlers, settings).then(
-      ({ buffer, mimeType, stats }) => ({ blob: new Blob([buffer], { type: mimeType }), stats }),
-    );
+    const result = this.startJob<DonePayload>(jobId, handlers, settings).then(toJobResult);
     this.send({ type: 'process', jobId, file, settings }, transferables(settings));
     return { jobId, result };
+  }
+
+  /**
+   * Replace the background using a saved cut-out: no model is needed, so this works
+   * even when none is loaded (a model-less worker is started if necessary).
+   */
+  reapply(file: File, matte: Blob, model: ModelId, settings: JobSettings, handlers: JobHandlers): { jobId: number; result: Promise<JobResult> } {
+    if (!this.worker) this.createWorker('compositing');
+    const jobId = this.nextJobId++;
+    const result = this.startJob<DonePayload>(jobId, handlers, settings).then(toJobResult);
+    this.send({ type: 'reapply', jobId, file, matte, model, settings }, transferables(settings));
+    return { jobId, result };
+  }
+
+  private createWorker(name: string): Worker {
+    const worker = new Worker(new URL('../worker/processor.worker.ts', import.meta.url), { type: 'module', name });
+    this.worker = worker;
+    worker.onmessage = (event: MessageEvent<FromWorker>) => this.handleMessage(event.data);
+    worker.onerror = (event) => {
+      event.preventDefault();
+      this.failEverything(new Error(`The processing worker crashed: ${event.message || 'unknown error'}. Select the model again to retry.`));
+    };
+    return worker;
   }
 
   previewFrame(file: File, settings: JobSettings, timeSeconds: number): { jobId: number; result: Promise<{ bitmap: ImageBitmap; frames: number }> } {
@@ -206,7 +225,7 @@ export class ProcessorClient {
         break;
       case 'done':
         this.pending.delete(message.jobId);
-        job.resolve({ buffer: message.buffer, mimeType: message.mimeType, stats: message.stats });
+        job.resolve({ buffer: message.buffer, mimeType: message.mimeType, stats: message.stats, matte: message.matte });
         break;
       case 'preview-done':
         this.pending.delete(message.jobId);
@@ -222,6 +241,14 @@ export class ProcessorClient {
         break;
     }
   }
+}
+
+function toJobResult({ buffer, mimeType, stats, matte }: DonePayload): JobResult {
+  return {
+    blob: new Blob([buffer], { type: mimeType }),
+    stats,
+    matte: matte ? new Blob([matte.buffer], { type: matte.mimeType }) : null,
+  };
 }
 
 function transferables(settings: JobSettings): Transferable[] {

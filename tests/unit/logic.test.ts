@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { computeOutputSize, rvmDownsampleRatio } from '../../src/lib/video/sizing';
 import { fixLayerNormMixedPrecision } from '../../src/lib/models/ortShaderFix';
+import { needsSoftwareDecode } from '../../src/lib/video/decoderWorkaround';
+import { packSize } from '../../src/lib/compositing/mattePack';
 
 describe('computeOutputSize', () => {
   it('keeps small videos unchanged (never upscales)', () => {
@@ -59,5 +61,23 @@ describe('fixLayerNormMixedPrecision', () => {
   it('leaves unrelated shaders untouched', () => {
     const other = 'enable f16; fn main() { let a = 1.0h; }';
     expect(fixLayerNormMixedPrecision(other)).toBe(other);
+  });
+});
+
+describe('needsSoftwareDecode', () => {
+  it('selects VP9 with a coded size that is not a multiple of 16', () => {
+    expect(needsSoftwareDecode({ codec: 'vp09.00.10.08', codedWidth: 960, codedHeight: 540 })).toBe(true);
+    expect(needsSoftwareDecode({ codec: 'vp9', codedWidth: 854, codedHeight: 480 })).toBe(true);
+  });
+  it('leaves aligned VP9 and other codecs alone', () => {
+    expect(needsSoftwareDecode({ codec: 'vp09.00.10.08', codedWidth: 1280, codedHeight: 720 })).toBe(false);
+    expect(needsSoftwareDecode({ codec: 'avc1.64001f', codedWidth: 960, codedHeight: 540 })).toBe(false);
+  });
+});
+
+describe('packSize', () => {
+  it('pads the side-by-side matte pack to multiples of 16', () => {
+    expect(packSize(960, 540)).toEqual({ width: 1920, height: 544 });
+    expect(packSize(1280, 720)).toEqual({ width: 2560, height: 720 });
   });
 });

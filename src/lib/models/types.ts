@@ -40,8 +40,11 @@ export interface MattingAdapter {
   readonly stageTimings: Record<string, number>;
   load(onProgress: (progress: DownloadProgress) => void): Promise<void>;
   resetState(): void;
-  /** `frame` is an opaque RGB image already at output resolution. */
-  process(frame: OffscreenCanvas): Promise<MatteResult>;
+  /**
+   * `frame` is an opaque RGB image already at output resolution; `timestamp` is its
+   * presentation time in seconds (used by the saved-matte adapter to find its frame).
+   */
+  process(frame: OffscreenCanvas, timestamp: number): Promise<MatteResult>;
   dispose(): Promise<void>;
 }
 

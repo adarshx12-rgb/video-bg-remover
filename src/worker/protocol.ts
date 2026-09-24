@@ -38,6 +38,8 @@ export interface JobStats {
 export type ToWorker =
   | { type: 'load'; model: ModelId; backendOverride?: string }
   | { type: 'process'; jobId: number; file: File; settings: JobSettings }
+  /** Re-composite from a saved cut-out (matte pack) without running a model. */
+  | { type: 'reapply'; jobId: number; file: File; matte: Blob; model: ModelId; settings: JobSettings }
   | { type: 'preview-frame'; jobId: number; file: File; timeSeconds: number; settings: JobSettings }
   | { type: 'cancel'; jobId: number };
 
@@ -48,7 +50,7 @@ export type FromWorker =
   | { type: 'phase'; jobId: number; phase: 'processing' | 'finalizing' }
   | { type: 'progress'; jobId: number; fraction: number; framesDone: number; msPerFrame: number }
   | { type: 'preview'; jobId: number; bitmap: ImageBitmap }
-  | { type: 'done'; jobId: number; buffer: ArrayBuffer; mimeType: string; stats: JobStats }
+  | { type: 'done'; jobId: number; buffer: ArrayBuffer; mimeType: string; stats: JobStats; matte: { buffer: ArrayBuffer; mimeType: string } | null }
   | { type: 'preview-done'; jobId: number; bitmap: ImageBitmap; frames: number }
   | { type: 'cancelled'; jobId: number }
   | { type: 'error'; jobId: number; message: string };

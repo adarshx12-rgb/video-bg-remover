@@ -81,7 +81,7 @@ const harness = {
         return { cancelled: (error as Error).name === 'CancelledError', message: (error as Error).message, lastFraction };
       }
     }
-    const { blob, stats } = await job.result;
+    const { blob, stats, matte } = await job.result;
     return {
       ms: performance.now() - t0,
       stats,
@@ -92,6 +92,8 @@ const harness = {
       type: blob.type,
       meta,
       base64: await toBase64(blob),
+      matteBase64: matte ? await toBase64(matte) : null,
+      matteType: matte?.type ?? null,
     };
   },
   preview: async (url: string, time: number, background: RunOptions['background']) => {
@@ -117,3 +119,50 @@ const harness = {
 
 (window as unknown as { harness: typeof harness }).harness = harness;
 document.body.dataset.ready = 'true';
+
+// Decode a file with Mediabunny's CanvasSink (as the saved-matte adapter does) and
+// return the mean RGB of the top rows of the frame at `time`.
+import { ALL_FORMATS as FORMATS, BlobSource as BSource, CanvasSink as CSink, Input as MInput } from 'mediabunny';
+(window as unknown as { decodeTopRows: unknown }).decodeTopRows = async (url: string, time: number, rows = 3) => {
+  const input = new MInput({ source: new BSource(await (await fetch(url)).blob()), formats: FORMATS });
+  const track = (await input.getPrimaryVideoTrack())!;
+  const sink = new CSink(track, { poolSize: 1 });
+  const wrapped = (await sink.getCanvas(time))!;
+  const c = wrapped.canvas as OffscreenCanvas;
+  const read = new OffscreenCanvas(c.width, rows);
+  const ctx = read.getContext('2d')!;
+  ctx.drawImage(c, 0, 0, c.width, rows, 0, 0, c.width, rows);
+  const d = ctx.getImageData(0, 0, c.width, rows).data;
+  let r = 0, g = 0, b = 0;
+  for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+  const n = d.length / 4;
+  input.dispose();
+  return { size: [c.width, c.height], rgb: [r / n, g / n, b / n].map(Math.round) };
+};
+
+// Decode the first frame with raw WebCodecs (no Mediabunny drawing) to isolate decoder
+// behaviour: reports frame geometry and the mean RGB of its top rows.
+import { EncodedPacketSink as PSink } from 'mediabunny';
+(window as unknown as { decodeRaw: unknown }).decodeRaw = async (url: string, hardwareAcceleration: HardwareAcceleration, rows = 3) => {
+  const input = new MInput({ source: new BSource(await (await fetch(url)).blob()), formats: FORMATS });
+  const track = (await input.getPrimaryVideoTrack())!;
+  const config = { ...(await track.getDecoderConfig())!, hardwareAcceleration };
+  const packet = (await new PSink(track).getFirstPacket())!;
+  const frame = await new Promise<VideoFrame>((resolve, reject) => {
+    const decoder = new VideoDecoder({ output: resolve, error: reject });
+    decoder.configure(config);
+    decoder.decode(packet.toEncodedVideoChunk());
+    void decoder.flush();
+  });
+  const info = { coded: [frame.codedWidth, frame.codedHeight], visible: frame.visibleRect && [frame.visibleRect.x, frame.visibleRect.y, frame.visibleRect.width, frame.visibleRect.height], display: [frame.displayWidth, frame.displayHeight], format: frame.format };
+  const c = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
+  const ctx = c.getContext('2d')!;
+  ctx.drawImage(frame, 0, 0);
+  frame.close();
+  const d = ctx.getImageData(0, 0, c.width, rows).data;
+  let r = 0, g = 0, b = 0;
+  for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+  const n = d.length / 4;
+  input.dispose();
+  return { ...info, rgb: [r / n, g / n, b / n].map(Math.round) };
+};

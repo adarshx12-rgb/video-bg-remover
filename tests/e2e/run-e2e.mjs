@@ -4,7 +4,7 @@
 // Prerequisites: `npm run make-test-videos`, ffmpeg + ffprobe on PATH, and the app
 // running (`npm run dev`, default http://localhost:4321; override with APP_URL).
 // Usage: node tests/e2e/run-e2e.mjs [scenario-name-filter]
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { launchPersistent } from './browser.mjs';
@@ -40,13 +40,19 @@ async function upload(page, file) {
   await page.locator('input[type=file][accept^="video"]').setInputFiles(join(MEDIA, file));
 }
 
+/** Select a model by its exact visible name ("Any subject" is a prefix of another name). */
 async function chooseModel(page, name) {
-  await page.getByRole('radio', { name: new RegExp(`^${name}`) }).check();
+  const option = page.locator('label.model-option').filter({ has: page.locator('.model-name').getByText(name, { exact: true }) });
+  await option.locator('input[type=radio]').check();
 }
 
 async function processAndDownload(page, { downloadName, timeout = 15 * 60_000 }) {
   await page.getByRole('button', { name: 'Remove background' }).click();
   await page.getByText('Your video is ready').waitFor({ timeout });
+  return readDownload(page, downloadName);
+}
+
+async function readDownload(page, downloadName) {
   // Read the exact bytes behind the Download link (the blob the user saves). Playwright's
   // download.saveAs() intermittently crashes headless Chrome 153 on this machine, even for
   // a 5-byte blob, so it is not used here.
@@ -172,6 +178,79 @@ await scenario('rvm: reduced frame rate keeps duration and audio', async () => {
   await page.close();
 });
 
+await scenario('replace background after the video is made (saved cut-out, no AI re-run)', async () => {
+  const page = await openApp();
+  await upload(page, 'person-audio.mp4');
+  await page.getByText('6.0 s').waitFor();
+  await chooseModel(page, 'People');
+  await page.getByText('Green', { exact: true }).click();
+  const green = await processAndDownload(page, { downloadName: 'reapply-0-green-full.mp4' });
+  await page.getByText(/Your cut-out is saved/).waitFor();
+
+  const apply = async (name) => {
+    const t0 = Date.now();
+    await page.getByRole('button', { name: 'Apply new background' }).click();
+    await page.getByText('New background applied').waitFor({ timeout: 10 * 60_000 });
+    const seconds = (Date.now() - t0) / 1000;
+    return { file: await readDownload(page, name), seconds };
+  };
+
+  // 1. Black background from the saved cut-out.
+  await page.getByText('Black', { exact: true }).click();
+  const black = await apply('reapply-1-black.mp4');
+  const v1 = verify('person-audio.mp4', black.file);
+  console.log(v1.log.replace(/^/gm, '   '));
+  assert(v1.ok, 'black re-apply failed verification');
+
+  // 2. Unload the model (switch away and back); re-applying must not download any model file.
+  await chooseModel(page, 'Any subject, fine detail');
+  await chooseModel(page, 'People');
+  const before = requests.length;
+  await page.getByText('Green', { exact: true }).click();
+  const greenAgain = await apply('reapply-2-green.mp4');
+  const modelRequests = requests.slice(before).filter((r) => r.host !== 'localhost');
+  assert(modelRequests.length === 0, `re-apply downloaded model files: ${modelRequests.map((r) => r.url).join(', ')}`);
+
+  // 3. Quality loss from the saved cut-out: compare against the original green run.
+  const psnrOut = spawnSync('ffmpeg', ['-hide_banner', '-i', green, '-i', greenAgain.file, '-lavfi', 'psnr', '-f', 'null', '-'], { encoding: 'utf8' }).stderr;
+  const psnr = Number(/average:([\d.]+|inf)/.exec(psnrOut)?.[1]);
+  console.log(`   PSNR green re-apply vs original green run: ${psnr} dB`);
+  assert(psnr > 32, `re-applied video differs too much from the original run (PSNR ${psnr} dB)`);
+
+  // 4. Transparent output from the saved cut-out.
+  await page.getByText('None', { exact: true }).click();
+  const transparent = await apply('reapply-3-transparent.webm');
+  const v3 = verify('person-audio.mp4', transparent.file, ['--alpha']);
+  console.log(v3.log.replace(/^/gm, '   '));
+  assert(v3.ok, 'transparent re-apply failed verification');
+  const alpha = alphaStats(transparent.file);
+  assert(alpha.transparent > 0.05 && alpha.opaque > 0.05, 'transparent re-apply has no real alpha');
+  await page.close();
+  return `re-apply ${black.seconds.toFixed(0)} s / ${greenAgain.seconds.toFixed(0)} s / ${transparent.seconds.toFixed(0)} s; PSNR ${psnr} dB; alpha ${(alpha.transparent * 100).toFixed(0)}% transparent`;
+});
+
+// withoutBG downloads ~455 MB the first time, so it runs only when requested:
+// E2E_WITHOUTBG=1 node tests/e2e/run-e2e.mjs withoutbg
+if (process.env.E2E_WITHOUTBG) {
+  await scenario('withoutbg: VP9 854x480 non-person subject -> WebM, full frame rate', async () => {
+    const page = await openApp();
+    await upload(page, 'cats-1s.webm');
+    await page.getByText('1.0 s').waitFor();
+    await chooseModel(page, 'Any subject');
+    assert(await page.getByText(/Built with DINOv3/).first().isVisible(), 'DINOv3 attribution not shown');
+    await page.getByText('White', { exact: true }).click();
+    await page.getByText('WebM (VP9)', { exact: true }).click();
+    const file = await processAndDownload(page, { downloadName: 'withoutbg-cats.webm', timeout: 30 * 60_000 });
+    const backend = await page.getByText(/Ready, running on/).innerText();
+    const v = verify('cats-1s.webm', file);
+    console.log(v.log.replace(/^/gm, '   '));
+    assert(v.ok, 'output verification failed');
+    execFileSync('ffmpeg', ['-y', '-v', 'error', '-ss', '0.5', '-i', file, '-frames:v', '1', '-vf', 'scale=480:-2', join(OUT, 'withoutbg-cats.png')]);
+    await page.close();
+    return backend;
+  });
+}
+
 // BEN2 is slow on most integrated GPUs (~30-40 s per frame measured), so this runs only
 // when requested: E2E_BEN2=1 node tests/e2e/run-e2e.mjs ben2
 if (process.env.E2E_BEN2) {
@@ -179,7 +258,7 @@ if (process.env.E2E_BEN2) {
     const page = await openApp();
     await upload(page, 'cats-1s.webm');
     await page.getByText('1.0 s').waitFor();
-    await chooseModel(page, 'General subjects');
+    await chooseModel(page, 'Any subject, fine detail');
     await page.getByText('Black', { exact: true }).click();
     await page.getByLabel('Frame rate').selectOption('5');
     const file = await processAndDownload(page, { downloadName: 'ben2-cats-5fps.mp4', timeout: 30 * 60_000 });
@@ -218,7 +297,7 @@ await scenario('model switching releases the previous model worker', async () =>
   await page.getByRole('button', { name: 'Preview this frame' }).click();
   await page.getByText(/Showing a preview of the frame/).waitFor({ timeout: 120000 });
   const before = page.workers().length;
-  await chooseModel(page, 'General subjects');
+  await chooseModel(page, 'Any subject, fine detail');
   await page.waitForTimeout(1000);
   const afterSwitch = page.workers().length;
   await chooseModel(page, 'People');

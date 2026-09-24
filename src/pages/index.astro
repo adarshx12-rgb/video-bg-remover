@@ -62,9 +62,14 @@ const maxMb = LIMITS.maxInputBytes / 1024 / 1024;
               keep hair and edges steady as someone moves. The download is small ({MODELS.rvm.approxDownload}).
             </p>
             <p>
-              <strong>{MODELS.ben2.name}</strong> also handles animals and objects, but it looks at every frame on its own
-              and needs a much larger download ({MODELS.ben2.approxDownload}). On many computers it takes several seconds
-              or more per frame, so try a lower frame rate first.
+              <strong>{MODELS.withoutbg.name}</strong> also handles animals and objects. It looks at every frame on its own,
+              so edges can flicker a little more than with People, and it needs the largest download
+              ({MODELS.withoutbg.approxDownload}). On our test computer it took about 4 to 5 seconds per frame.
+            </p>
+            <p>
+              <strong>{MODELS.ben2.name}</strong> keeps crisper hair and fur edges but is much slower: about 30 seconds or
+              more per frame on our test computer ({MODELS.ben2.approxDownload} download). For both general models, try a
+              lower frame rate and a short clip first.
             </p>
             <p>
               Neither model is perfect. Busy backgrounds, motion blur and subjects that match the background can leave
@@ -99,6 +104,13 @@ const maxMb = LIMITS.maxInputBytes / 1024 / 1024;
               Soumyadip Sengupta, from the <a href={MODELS.rvm.sourceUrl}>official repository</a>. The model is licensed
               under the <a href={MODELS.rvm.licenceUrl}>GNU GPL v3.0</a>. Because this app uses it, the app’s own source code
               is also released under GPL-3.0.
+            </p>
+            <p>
+              <strong>withoutBG open-weights model</strong> (version 10) by withoutBG
+              (<a href={MODELS.withoutbg.sourceUrl}>source</a>, <a href="https://huggingface.co/withoutbg/withoutbg-openweights-onnx">model files</a>),
+              under the <a href={MODELS.withoutbg.licenceUrl}>withoutBG open model licence</a> (Apache-2.0). It includes
+              Depth Anything V2 Small (Apache-2.0) and Meta’s DINOv3 ConvNeXt, used under the
+              <a href="https://ai.meta.com/resources/models-and-libraries/dinov3-license/">DINOv3 License</a>. Built with DINOv3.
             </p>
             <p>
               <strong>BEN2 Base</strong> by Prama LLC (<a href={MODELS.ben2.sourceUrl}>source</a>), used through the

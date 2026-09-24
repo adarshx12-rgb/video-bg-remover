@@ -56,6 +56,9 @@ export async function cachedFetch(
 
   const lengthHeader = response.headers.get('content-length');
   const total = lengthHeader ? Number(lengthHeader) : null;
+  // When the size is known, write straight into one buffer so large models (hundreds of
+  // MB) are not held twice in memory while downloading.
+  let preallocated: Uint8Array<ArrayBuffer> | null = total && total > 0 ? new Uint8Array(total) : null;
   const chunks: Uint8Array[] = [];
   let loaded = 0;
   if (response.body) {
@@ -63,21 +66,32 @@ export async function cachedFetch(
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      chunks.push(value);
+      if (preallocated && loaded + value.byteLength <= preallocated.byteLength) preallocated.set(value, loaded);
+      else {
+        // Size header was wrong: fall back to collecting chunks.
+        if (preallocated) chunks.push(preallocated.subarray(0, loaded));
+        preallocated = null;
+        chunks.push(value);
+      }
       loaded += value.byteLength;
       onProgress({ url, loaded, total, fromCache: false });
     }
   } else {
+    preallocated = null;
     const buffer = new Uint8Array(await response.arrayBuffer());
     chunks.push(buffer);
     loaded = buffer.byteLength;
   }
 
-  const data = new Uint8Array(loaded);
-  let offset = 0;
-  for (const chunk of chunks) {
-    data.set(chunk, offset);
-    offset += chunk.byteLength;
+  let data: Uint8Array<ArrayBuffer>;
+  if (preallocated && loaded === preallocated.byteLength) data = preallocated;
+  else {
+    data = new Uint8Array(loaded);
+    let offset = 0;
+    for (const chunk of preallocated ? [preallocated.subarray(0, loaded)] : chunks) {
+      data.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
   }
   onProgress({ url, loaded, total: total ?? loaded, fromCache: false });
 

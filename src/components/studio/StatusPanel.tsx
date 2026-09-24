@@ -6,13 +6,14 @@ import type { FriendlyError } from './errors';
 export type JobState =
   | { status: 'idle' }
   | { status: 'loading-model'; progress: DownloadProgress | null; modelName: string }
-  | { status: 'processing'; phase: 'processing' | 'finalizing'; fraction: number; framesDone: number; msPerFrame: number; totalFrames: number }
+  | { status: 'processing'; mode: 'full' | 'reapply'; phase: 'processing' | 'finalizing'; fraction: number; framesDone: number; msPerFrame: number; totalFrames: number }
   | { status: 'cancelling' }
   | { status: 'cancelled' }
-  | { status: 'done'; url: string; fileName: string; size: number; stats: JobStats; formatLabel: string; stale: boolean }
+  | { status: 'done'; mode: 'full' | 'reapply'; url: string; fileName: string; size: number; stats: JobStats; formatLabel: string; stale: boolean }
   | { status: 'error'; error: FriendlyError };
 
-export function StatusPanel({ job }: { job: JobState }) {
+/** `staleNote` explains what to do when settings changed after the video was made. */
+export function StatusPanel({ job, staleNote }: { job: JobState; staleNote?: string }) {
   switch (job.status) {
     case 'idle':
       return null;
@@ -44,7 +45,13 @@ export function StatusPanel({ job }: { job: JobState }) {
       const etaSeconds = job.msPerFrame > 0 ? (remainingFrames * job.msPerFrame) / 1000 : null;
       return (
         <div className="status" role="status" aria-live="polite">
-          <p className="status-title">{job.phase === 'finalizing' ? 'Finishing the video file' : 'Removing the background'}</p>
+          <p className="status-title">
+            {job.phase === 'finalizing'
+              ? 'Finishing the video file'
+              : job.mode === 'reapply'
+                ? 'Applying the new background'
+                : 'Removing the background'}
+          </p>
           <Progress value={job.phase === 'finalizing' ? null : job.fraction} label="Processing" />
           <p className="status-detail">
             {job.phase === 'finalizing'
@@ -77,13 +84,13 @@ export function StatusPanel({ job }: { job: JobState }) {
       const { stats } = job;
       return (
         <div className="status status-done" role="status" aria-live="polite">
-          <p className="status-title">Your video is ready</p>
+          <p className="status-title">{job.mode === 'reapply' ? 'New background applied' : 'Your video is ready'}</p>
           <p className="status-detail">
-            {job.formatLabel}, {stats.width} × {stats.height}, {formatBytes(job.size)}. Took {formatEta(stats.processingSeconds)} on{' '}
+            {job.formatLabel}, {stats.width} × {stats.height}, {formatBytes(job.size)}. Took {formatEta(stats.processingSeconds)} using{' '}
             {stats.backend}.
           </p>
           <AudioNote stats={stats} />
-          {job.stale && <p className="inline-note">You changed the settings. Select Remove background again to apply them.</p>}
+          {job.stale && staleNote && <p className="inline-note">{staleNote}</p>}
         </div>
       );
     }

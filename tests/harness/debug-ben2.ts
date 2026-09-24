@@ -26,7 +26,7 @@ export async function debugBen2(device: 'webgpu' | 'wasm', imageUrl: string, wit
   let ok = true, message = '', mask: number[] = [];
   const times: number[] = [];
   try {
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 1; i++) {
       const t0 = performance.now();
       const out = (await seg(image)) as RawImage;
       times.push(performance.now() - t0);

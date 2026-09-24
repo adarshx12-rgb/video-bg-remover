@@ -5,12 +5,25 @@ your browser**: the video and its sound are never uploaded, there is no server-s
 AI, and no paid inference API. The only downloads are the AI model files, fetched the
 first time you use a model and then kept by your browser.
 
-It offers two models:
+It offers three models:
 
-| Choice in the app | Model | Good for | Download |
-| --- | --- | --- | --- |
-| **People** | [Robust Video Matting](https://github.com/PeterL1n/RobustVideoMatting) MobileNetV3 (official TensorFlow.js model) | Videos of people. Uses previous frames (recurrent state) for steadier edges. | ~4 MB |
-| **General subjects** | [BEN2 Base](https://github.com/PramaLLC/BEN2) via [onnx-community/BEN2-ONNX](https://huggingface.co/onnx-community/BEN2-ONNX) and Transformers.js | People, animals, objects. Each frame on its own. Not guaranteed to work for every subject. | ~220 MB |
+| Choice in the app | Model | Good for | Download | Speed on the test machine* |
+| --- | --- | --- | --- | --- |
+| **People** | [Robust Video Matting](https://github.com/PeterL1n/RobustVideoMatting) MobileNetV3 (official TensorFlow.js model) | Videos of people. Uses previous frames (recurrent state) for steadier edges. | ~4 MB | ~0.5 s/frame |
+| **Any subject** | [withoutBG open weights](https://github.com/withoutbg/withoutbg-python) v10 ([ONNX](https://huggingface.co/withoutbg/withoutbg-openweights-onnx)) via ONNX Runtime Web | People, animals, objects. Each frame on its own; 448 px matte, so hair/fur edges are softer. | ~455 MB | ~4.5 s/frame |
+| **Any subject, fine detail** | [BEN2 Base](https://github.com/PramaLLC/BEN2) via [onnx-community/BEN2-ONNX](https://huggingface.co/onnx-community/BEN2-ONNX) and Transformers.js | People, animals, objects, with crisper hair/fur edges (1024 px). | ~220 MB | ~30–39 s/frame |
+
+* 1280×720 frames, Chrome 153, Intel UHD (Gen9) integrated GPU, WebGPU. One machine only;
+not a general benchmark. None of the models is guaranteed to work for every subject.
+
+### Why withoutBG was added
+
+It was evaluated before being integrated. On the same two test images it agreed closely
+with BEN2 (IoU 0.985 on a portrait, 0.954 on two cats). It ran about **7–9× faster**
+(4.2–4.5 s vs 27–39 s per frame), which makes short general-subject videos practical on
+integrated graphics. It is fp32, so unlike BEN2's fp16 weights it does not need the
+WebGPU `shader-f16` feature or the ONNX Runtime shader workaround. The trade-offs:
+visibly softer hair edges (a 448 px matte instead of 1024 px) and the largest download.
 
 ## Quick start
 
@@ -49,6 +62,10 @@ Other commands:
 4. Optionally select **Preview this frame** to check the result, and the estimated time,
    before processing the whole video. Drag the divider to compare.
 5. Select **Remove background**, then **Download**.
+6. Want a different background? Pick one (or change edge softness or the file type) and
+   select **Apply new background**. The cut-out from the first run is saved, so the AI
+   model doesn't run again: on the test machine this took 6–8 s instead of ~90 s for a
+   6-second clip. Changing the model or frame rate needs a full run.
 
 ## Features
 
@@ -60,6 +77,7 @@ Other commands:
   downloading the model, preparing it, processing, finishing the file, done and errors.
 - Clear error messages with a next step (too long, too big, unsupported codec, download
   failure, out of memory, GPU failure).
+- Replace the background after processing without re-running the AI (see below).
 - Optional lower frame rate (24/15/10/5 fps) that keeps the full duration and sound.
 - Conservative edge softness (0–3 px blur of the matte only; no temporal smoothing, so no
   motion ghosting).
@@ -115,6 +133,18 @@ File ─► Mediabunny demux + WebCodecs decode (timestamped frames, rotation ba
   published weights are fp16). Otherwise, or if WebGPU fails its warm-up, it restarts on
   WebAssembly (CPU), and the app says so, because it is much slower.
 
+### Replacing the background later (saved cut-out)
+
+Every full run also records a compact **matte pack**: a side-by-side video with the
+foreground colours on the left and the matte as greyscale on the right, using the same
+timestamps as the export. It is encoded with an ordinary codec (VP9, otherwise H.264) and
+padded to multiples of 16 pixels, and it stays in memory as a compressed blob (about
+3 MB for a 4 s 960×540 clip). **Apply new background** re-runs the normal export with
+an adapter that reads the pack instead of a model, so audio, timing, transparency and
+edge softness behave the same. The quality cost is small: re-applying the same green
+background reproduced the original run at **46.8 dB PSNR**. If recording the pack fails,
+the export still succeeds; only this shortcut is unavailable.
+
 ### Source layout
 
 | Path | Responsibility |
@@ -122,8 +152,9 @@ File ─► Mediabunny demux + WebCodecs decode (timestamped frames, rotation ba
 | `src/config.ts` | Limits, pinned model versions, model descriptions |
 | `src/lib/capabilities.ts` | Browser capability detection, format checks, alpha self-test |
 | `src/lib/video/probe.ts`, `sizing.ts` | Metadata, validation, output size |
-| `src/lib/models/` | `MattingAdapter` interface, RVM and BEN2 adapters, cached downloads, ONNX Runtime shader workaround |
-| `src/lib/compositing/compositor.ts` | Matte + background compositing |
+| `src/lib/models/` | `MattingAdapter` interface; RVM, withoutBG, BEN2 and saved-cut-out adapters; cached downloads; ONNX Runtime shader workaround |
+| `src/lib/compositing/` | Matte + background compositing; matte pack writer |
+| `src/lib/video/decoderWorkaround.ts` | Forces software decoding for VP9 sizes Chrome's hardware decoder corrupted |
 | `src/lib/pipeline.ts` | Decode → matte → composite → encode → mux, frame preview |
 | `src/worker/` | Worker entry point and message protocol |
 | `src/lib/processorClient.ts` | Main-thread worker owner (jobs, cancel, model switching, GPU fallback) |
@@ -136,6 +167,7 @@ File ─► Mediabunny demux + WebCodecs decode (timestamped frames, rotation ba
 | Model | Files | Downloaded from | Cached in |
 | --- | --- | --- | --- |
 | RVM | `model.json`, `group1-shard1of1.bin` (~4.4 MB) | `raw.githubusercontent.com`, pinned to commit `72ed518` | Cache API, cache `rvm-tfjs-72ed518` (older versions removed automatically) |
+| withoutBG | `withoutbg-open-weights.onnx` (~455 MB), SHA-256 checked after download | `huggingface.co`, pinned to revision `cfae4da` | Cache API, cache `withoutbg-onnx-cfae4da` |
 | BEN2 | `config.json`, `preprocessor_config.json`, `onnx/model_fp16.onnx` (~219 MB) | `huggingface.co`, pinned to revision `c552aa8` | Cache API, Transformers.js cache `transformers-cache` |
 
 - Downloads start only when you first preview or process with that model.
@@ -153,6 +185,14 @@ File ─► Mediabunny demux + WebCodecs decode (timestamped frames, rotation ba
   you distribute it (for example by hosting it), you must provide the complete source,
   including your changes, under GPL-3.0, and keep the licence notices.
 - **RVM model:** GPL-3.0, © its authors (Lin, Yang, Saleemi, Sengupta), from the official repository.
+- **withoutBG open weights:** Apache-2.0 (withoutBG open model licence). The model contains
+  Meta's DINOv3 ConvNeXt, used under the **DINOv3 License**, a custom licence (not OSI
+  open source). It allows commercial use but requires a copy of the licence with
+  redistributions, a prominent **"Built with DINOv3"** notice (shown in the app and on the
+  page), and prohibits some uses (for example military, ITAR-controlled and weapons
+  applications) and use by parties subject to trade controls. It also includes Depth
+  Anything V2 Small (Apache-2.0). The app downloads these weights at runtime and does not
+  redistribute them from this repository.
 - **BEN2 Base / BEN2-ONNX:** MIT, © 2025 Prama LLC. This is the public Base model, not
   Prama's commercial model.
 - Libraries keep their own licences (Apache-2.0, MIT, MPL-2.0, OFL-1.1); not everything
@@ -163,6 +203,8 @@ File ─► Mediabunny demux + WebCodecs decode (timestamped frames, rotation ba
 - **Speed depends heavily on the GPU.** Measured on the development machine (Intel UHD
   Gen9 integrated GPU, Chrome 153, Windows 11):
   - People (RVM), 1280×720, WebGPU: about **0.5 s per frame**; WebGL: about 1.4 s per frame.
+  - Any subject (withoutBG), WebGPU: about **4.2–4.5 s per frame** (ONNX Runtime reported
+    that some nodes run on the CPU).
   - General subjects (BEN2), WebGPU: about **30–40 s per frame**; WebAssembly: about 47 s
     per frame. A 30-second video at 30 fps would take hours. Use a lower frame rate and
     short clips, or the People model.
@@ -187,6 +229,13 @@ File ─► Mediabunny demux + WebCodecs decode (timestamped frames, rotation ba
 - `dist/` is about 55 MB: the ONNX Runtime WASM file (26 MB) appears twice, in `ort/`
   (used) and as an unused fallback copy that Vite bundles into `_astro/`. Browsers only
   download the one they need, and only when BEN2 is used.
+- **VP9 hardware decoding workaround.** On the test machine, Chrome's hardware VP9
+  decoder returned frames with corrupted (green-tinted) top rows when the coded size was
+  not a multiple of 16 (for example 960×540). The processing worker switches only those
+  VP9 streams to software decoding, when the browser supports it. Other codecs and
+  sizes are unchanged.
+- The saved cut-out for **Apply new background** is kept only in the open tab's memory.
+  It is lost on reload and replaced by the next full run.
 - Subtitle and extra tracks are dropped; only the main video and audio tracks are kept.
 - No temporal smoothing is applied, so a mask may flicker on hard frames (BEN2
   especially, since it processes frames independently).
