@@ -1,0 +1,134 @@
+/*
+ * Design tokens. Neutral "grading suite" palette: reference greys for the page, a dark
+ * surround for judging footage, and one key-blue reserved for the primary action,
+ * progress and focus.
+ */
+:root {
+  --paper: #f1f1ef;
+  --paper-raised: #f8f8f7;
+  --ink: #1c1e1d;
+  --graphite: #5b5f5d;
+  --rule: #d3d5d2;
+  --stage: #262827;
+  --stage-ink: #e8e9e7;
+  --stage-muted: #a5a9a6;
+  --key: #2447d6;
+  --key-hover: #1b38b0;
+  --key-ink: #ffffff;
+  --key-soft: #e3e8fb;
+  --danger: #a3261d;
+  --danger-soft: #f8e6e4;
+  --ok: #1d6b45;
+  --checker-a: #d9dad8;
+  --checker-b: #f4f4f3;
+
+  --font: 'Schibsted Grotesk Variable', 'Schibsted Grotesk', system-ui, sans-serif;
+  /* Type scale: 1.25 ratio from a 17px body. */
+  --step--1: 0.8rem;
+  --step-0: 1.0625rem;
+  --step-1: 1.328rem;
+  --step-2: 1.66rem;
+  --step-3: clamp(1.9rem, 1.4rem + 2.2vw, 2.9rem);
+
+  --radius-stage: 14px;
+  --radius-control: 8px;
+  --gutter: 16px;
+  --measure: 68ch;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1a1c1b;
+    --paper-raised: #222423;
+    --ink: #ecedeb;
+    --graphite: #a6aaa7;
+    --rule: #363937;
+    --stage: #111312;
+    --stage-ink: #e8e9e7;
+    --stage-muted: #9a9e9b;
+    --key: #8a9dff;
+    --key-hover: #a7b5ff;
+    --key-ink: #10152e;
+    --key-soft: #252c4d;
+    --danger: #ff9d94;
+    --danger-soft: #3a1f1c;
+    --ok: #7fd3a6;
+    --checker-a: #3a3c3b;
+    --checker-b: #2a2c2b;
+    color-scheme: dark;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--step-0);
+  line-height: 1.55;
+  font-optical-sizing: auto;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.12;
+  margin: 0;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--key);
+  text-underline-offset: 0.18em;
+}
+
+a:hover {
+  color: var(--key-hover);
+}
+
+:focus-visible {
+  outline: 3px solid var(--key);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.checker {
+  background-color: var(--checker-b);
+  background-image: conic-gradient(var(--checker-a) 25%, transparent 0 50%, var(--checker-a) 0 75%, transparent 0);
+  background-size: 18px 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

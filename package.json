@@ -1,0 +1,44 @@
+{
+  "name": "video-bg-remove",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "In-browser video background remover using RVM (people) and BEN2 (general subjects).",
+  "scripts": {
+    "prepare-assets": "node scripts/copy-ort-wasm.mjs",
+    "dev": "npm run prepare-assets && astro dev",
+    "build": "npm run prepare-assets && npm run typecheck && astro build",
+    "preview": "astro preview",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "harness": "npm run prepare-assets && vite --config vite.harness.config.ts",
+    "make-test-videos": "node scripts/make-test-videos.mjs",
+    "e2e": "node tests/e2e/run-e2e.mjs"
+  },
+  "license": "GPL-3.0-only",
+  "dependencies": {
+    "@astrojs/react": "7.0.0",
+    "@fontsource-variable/schibsted-grotesk": "5.3.0",
+    "@huggingface/transformers": "4.3.0",
+    "@tensorflow/tfjs-backend-webgl": "4.22.0",
+    "@tensorflow/tfjs-backend-webgpu": "4.22.0",
+    "@tensorflow/tfjs-converter": "4.22.0",
+    "@tensorflow/tfjs-core": "4.22.0",
+    "astro": "7.3.5",
+    "mediabunny": "1.59.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "playwright-core": "1.63.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.1",
+    "vitest": "5.0.1"
+  },
+  "overrides": {
+    "onnxruntime-web": "1.30.0"
+  }
+}

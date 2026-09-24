@@ -1,0 +1,242 @@
+---
+import Base from '../layouts/Base.astro';
+import Studio from '../components/Studio';
+import { LIMITS, MODELS } from '../config';
+
+const maxMb = LIMITS.maxInputBytes / 1024 / 1024;
+---
+
+<Base
+  title="Matte: remove a video background in your browser"
+  description="Remove or replace the background of a short video. Processing happens on your device; nothing is uploaded."
+>
+  <div class="page">
+    <header class="masthead">
+      <a class="wordmark" href="/" aria-label="Matte, home">
+        <svg aria-hidden="true" viewBox="0 0 32 32" width="26" height="26">
+          <rect width="32" height="32" rx="7" fill="currentColor"></rect>
+          <path d="M16 0h9a7 7 0 0 1 7 7v18a7 7 0 0 1-7 7h-9z" fill="var(--key)"></path>
+          <circle cx="16" cy="13" r="5.5" fill="var(--paper)"></circle>
+          <path d="M6 29c1.6-5.6 5.4-8.3 10-8.3s8.4 2.7 10 8.3z" fill="var(--paper)"></path>
+        </svg>
+        Matte
+      </a>
+      <p class="masthead-note">No account. Nothing uploaded.</p>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="intro-title">
+        <h1 id="intro-title">Remove the background from a video, right on your device.</h1>
+        <p class="lede">
+          Your video is processed on your device. AI model files are downloaded when needed.
+        </p>
+      </section>
+
+      <Studio client:only="react">
+        <div slot="fallback" class="studio-fallback">
+          <p>Loading the editor…</p>
+          <noscript>This tool needs JavaScript turned on, because the video is processed by your browser.</noscript>
+        </div>
+      </Studio>
+
+      <div class="notes">
+        <section class="note" aria-labelledby="privacy-title">
+          <h2 id="privacy-title">What happens to your video</h2>
+          <div class="note-body">
+            <p>
+              Your browser reads the file, removes the background frame by frame and writes a new video file. The video and
+              its sound never leave your device: there is no upload, no server-side processing and no paid AI service.
+            </p>
+            <p>
+              The only downloads are the AI model files, fetched from GitHub or Hugging Face the first time you use a model.
+              Your browser keeps a copy, so later visits start faster. No accounts, ads, analytics or tracking.
+            </p>
+          </div>
+        </section>
+
+        <section class="note" aria-labelledby="models-title">
+          <h2 id="models-title">Which model should I pick?</h2>
+          <div class="note-body">
+            <p>
+              <strong>{MODELS.rvm.name}</strong> is built for videos of people. It looks at previous frames, which helps
+              keep hair and edges steady as someone moves. The download is small ({MODELS.rvm.approxDownload}).
+            </p>
+            <p>
+              <strong>{MODELS.ben2.name}</strong> also handles animals and objects, but it looks at every frame on its own
+              and needs a much larger download ({MODELS.ben2.approxDownload}). On many computers it takes several seconds
+              or more per frame, so try a lower frame rate first.
+            </p>
+            <p>
+              Neither model is perfect. Busy backgrounds, motion blur and subjects that match the background can leave
+              rough edges. Use Preview this frame to check before processing the whole video.
+            </p>
+          </div>
+        </section>
+
+        <section class="note" aria-labelledby="limits-title">
+          <h2 id="limits-title">Current limits</h2>
+          <div class="note-body">
+            <ul>
+              <li>Videos up to {LIMITS.maxDurationSeconds} seconds and {maxMb} MB.</li>
+              <li>
+                The result fits within {LIMITS.maxOutputDimension} × {LIMITS.maxOutputDimension} pixels, keeps the original
+                shape and is never enlarged.
+              </li>
+              <li>
+                Works best in an up-to-date Chrome or Edge on a computer. Other browsers may be missing the video or graphics
+                features this needs; the tool tells you when that happens.
+              </li>
+              <li>Speed depends on your graphics chip. Processing is not real-time on most devices.</li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="note" id="licences" aria-labelledby="licences-title">
+          <h2 id="licences-title">Models and licences</h2>
+          <div class="note-body">
+            <p>
+              <strong>Robust Video Matting (RVM), MobileNetV3</strong> by Shanchuan Lin, Linjie Yang, Imran Saleemi and
+              Soumyadip Sengupta, from the <a href={MODELS.rvm.sourceUrl}>official repository</a>. The model is licensed
+              under the <a href={MODELS.rvm.licenceUrl}>GNU GPL v3.0</a>. Because this app uses it, the app’s own source code
+              is also released under GPL-3.0.
+            </p>
+            <p>
+              <strong>BEN2 Base</strong> by Prama LLC (<a href={MODELS.ben2.sourceUrl}>source</a>), used through the
+              community <a href="https://huggingface.co/onnx-community/BEN2-ONNX">BEN2-ONNX</a> conversion, both published
+              under the MIT licence. This is the public Base model, not Prama’s separate commercial model.
+            </p>
+            <p>
+              The app also uses TensorFlow.js (Apache-2.0), Transformers.js (Apache-2.0), ONNX Runtime Web (MIT), Mediabunny
+              (MPL-2.0), React (MIT), Astro (MIT) and Schibsted Grotesk (SIL Open Font Licence). Each keeps its own licence;
+              see THIRD_PARTY_NOTICES.md in the source.
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <p>Matte is free software under the GPL-3.0 licence. It runs entirely in your browser.</p>
+    </footer>
+  </div>
+</Base>
+
+<style>
+  .page {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 var(--gutter) 48px;
+  }
+
+  @media (min-width: 720px) {
+    .page {
+      --gutter: 32px;
+    }
+  }
+
+  .masthead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ink);
+    font-weight: 700;
+    font-size: var(--step-1);
+    letter-spacing: -0.02em;
+    text-decoration: none;
+  }
+
+  .masthead-note {
+    color: var(--graphite);
+    font-size: var(--step--1);
+  }
+
+  .intro {
+    display: grid;
+    gap: 16px;
+    padding: 36px 0 28px;
+  }
+
+  @media (min-width: 900px) {
+    .intro {
+      grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+      align-items: end;
+      gap: 48px;
+      padding: 52px 0 36px;
+    }
+  }
+
+  .intro h1 {
+    font-size: var(--step-3);
+    font-weight: 680;
+    letter-spacing: -0.028em;
+    line-height: 1.04;
+    max-width: 17ch;
+  }
+
+  .lede {
+    color: var(--graphite);
+    font-size: var(--step-1);
+    line-height: 1.4;
+    max-width: 30ch;
+  }
+
+  .studio-fallback {
+    min-height: 360px;
+    display: grid;
+    place-items: center;
+    background: var(--stage);
+    color: var(--stage-muted);
+    border-radius: var(--radius-stage);
+  }
+
+  .notes {
+    margin-top: 72px;
+  }
+
+  .note {
+    display: grid;
+    gap: 12px;
+    padding: 28px 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  @media (min-width: 900px) {
+    .note {
+      grid-template-columns: 300px minmax(0, 1fr);
+      gap: 32px;
+    }
+  }
+
+  .note h2 {
+    font-size: var(--step-1);
+  }
+
+  .note-body {
+    display: grid;
+    gap: 12px;
+    max-width: var(--measure);
+  }
+
+  .note-body ul {
+    margin: 0;
+    padding-left: 1.2em;
+    display: grid;
+    gap: 6px;
+  }
+
+  .footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 20px;
+    color: var(--graphite);
+    font-size: var(--step--1);
+  }
+</style>

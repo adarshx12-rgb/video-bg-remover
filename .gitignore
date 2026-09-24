@@ -1,0 +1,8 @@
+node_modules
+dist
+public/ort
+test-media
+test-results
+*.log
+.astro
+tsconfig.tsbuildinfo

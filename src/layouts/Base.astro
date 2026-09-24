@@ -1,0 +1,28 @@
+---
+import '@fontsource-variable/schibsted-grotesk';
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description: string;
+}
+const { title, description } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="color-scheme" content="light dark" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23262827'/%3E%3Cpath d='M16 0h16v32H16z' fill='%232447d6'/%3E%3Ccircle cx='16' cy='13' r='5.5' fill='%23fff'/%3E%3Cpath d='M6 29c1.6-5.6 5.4-8.3 10-8.3s8.4 2.7 10 8.3z' fill='%23fff'/%3E%3C/svg%3E"
+    />
+    <title>{title}</title>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>
