@@ -2,7 +2,7 @@
 import type { ModelId } from '../config';
 import { SavedMatteAdapter } from '../lib/models/savedMatte';
 import type { MattingAdapter } from '../lib/models/types';
-import { installVp9DecodeWorkaround } from '../lib/video/decoderWorkaround';
+import { installAvcCodecFix, installVp9DecodeWorkaround } from '../lib/video/decoderWorkaround';
 import { JobCancelledError, previewFrame, processVideo, type CancelToken } from '../lib/pipeline';
 import type { BackgroundMessage, FromWorker, ToWorker } from './protocol';
 
@@ -12,6 +12,7 @@ import type { BackgroundMessage, FromWorker, ToWorker } from './protocol';
  */
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 installVp9DecodeWorkaround();
+installAvcCodecFix();
 
 let adapter: MattingAdapter | null = null;
 let loading: Promise<MattingAdapter> | null = null;

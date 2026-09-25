@@ -1,6 +1,10 @@
 import { ALL_FORMATS, BlobSource, Input } from 'mediabunny';
 import { LIMITS } from '../../config';
 import { computeOutputSize } from './sizing';
+import { installAvcCodecFix } from './decoderWorkaround';
+
+// mediabunny's canDecode() below checks support on this (main) thread.
+installAvcCodecFix();
 
 export interface VideoMetadata {
   fileName: string;

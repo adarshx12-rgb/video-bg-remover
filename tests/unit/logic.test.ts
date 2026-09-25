@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { computeOutputSize, rvmDownsampleRatio } from '../../src/lib/video/sizing';
 import { fixLayerNormMixedPrecision } from '../../src/lib/models/ortShaderFix';
-import { needsSoftwareDecode } from '../../src/lib/video/decoderWorkaround';
+import { avcCodecFromDescription, needsSoftwareDecode } from '../../src/lib/video/decoderWorkaround';
 import { packSize } from '../../src/lib/compositing/mattePack';
 import { ORT_VERSION, ORT_WASM_PATHS } from '../../src/config';
 
@@ -89,5 +89,22 @@ describe('ORT_VERSION', () => {
     const installed = JSON.parse(readFileSync('node_modules/onnxruntime-web/package.json', 'utf8')).version;
     expect(ORT_VERSION).toBe(installed);
     expect(ORT_WASM_PATHS.wasm).toContain(`onnxruntime-web@${installed}/`);
+  });
+});
+
+describe('avcCodecFromDescription', () => {
+  // avcC from a Telegram export: the header says level 4 (invalid), the SPS says 40 (4.0).
+  const telegram = Buffer.from('01640004ffe1001367640028acb403c0113f2cd40404041e28554001000468ee0d8b7bf7f700', 'hex');
+  it('takes profile, constraints and level from the SPS, not the avcC header', () => {
+    expect(avcCodecFromDescription('avc1.640004', telegram)).toBe('avc1.640028');
+  });
+  it('keeps the avc3 prefix and leaves correct strings unchanged', () => {
+    expect(avcCodecFromDescription('avc3.640004', telegram)).toBe('avc3.640028');
+    expect(avcCodecFromDescription('avc1.640028', telegram)).toBe('avc1.640028');
+  });
+  it('leaves other codecs and missing or malformed descriptions alone', () => {
+    expect(avcCodecFromDescription('vp09.00.10.08', telegram)).toBe('vp09.00.10.08');
+    expect(avcCodecFromDescription('avc1.640004', undefined)).toBe('avc1.640004');
+    expect(avcCodecFromDescription('avc1.640004', new Uint8Array([1, 2, 3]))).toBe('avc1.640004');
   });
 });
