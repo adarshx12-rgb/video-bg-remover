@@ -175,8 +175,11 @@ the export still succeeds; only this shortcut is unavailable.
   indeterminate bar otherwise.
 - If caching is unavailable (for example in some private windows, or storage is full),
   the model still loads but will be downloaded again next time.
-- The ONNX Runtime WebAssembly files are served by this app from `public/ort/` (copied from
-  `node_modules` by `npm run prepare-assets`), not from a third-party CDN.
+- The ONNX Runtime WebAssembly runtime (used by withoutBG and BEN2) loads from jsDelivr,
+  pinned to the installed version (`ORT_WASM_PATHS` in `src/config.ts`). The `.wasm` file is
+  about 25.5 MiB, over Cloudflare's 25 MiB per-file limit, so the site cannot serve it
+  itself. `npm run build` ends with `scripts/check-dist.mjs`, which fails if any built
+  file is over that limit.
 - To clear cached models: browser settings → site data for `localhost` → clear.
 
 ## Licences
@@ -226,9 +229,6 @@ the export still succeeds; only this shortcut is unavailable.
 - Transparent WebM plays with transparency in Chrome, Edge and Firefox, but not in Safari or most phone galleries.
 - Variable-frame-rate input keeps its exact timestamps. Choosing a lower frame rate
   produces constant-rate output.
-- `dist/` is about 55 MB: the ONNX Runtime WASM file (26 MB) appears twice, in `ort/`
-  (used) and as an unused fallback copy that Vite bundles into `_astro/`. Browsers only
-  download the one they need, and only when BEN2 is used.
 - **VP9 hardware decoding workaround.** On the test machine, Chrome's hardware VP9
   decoder returned frames with corrupted (green-tinted) top rows when the coded size was
   not a multiple of 16 (for example 960×540). The processing worker switches only those

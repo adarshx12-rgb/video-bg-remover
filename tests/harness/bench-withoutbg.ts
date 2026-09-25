@@ -3,15 +3,13 @@
 // NCHW input "rgb", output "alpha" [1,1,448,448] -> crop -> resize to original size.
 import * as ort from 'onnxruntime-web/webgpu';
 import { cachedFetch, openModelCache } from '../../src/lib/models/cachedFetch';
+import { ORT_WASM_PATHS } from '../../src/config';
 
 const REVISION = 'cfae4da1ee09b27c45af2af2096d4d14721508ba';
 const MODEL_URL = `https://huggingface.co/withoutbg/withoutbg-openweights-onnx/resolve/${REVISION}/withoutbg-open-weights.onnx`;
 const CANVAS = 448;
 
-ort.env.wasm.wasmPaths = {
-  mjs: new URL('/ort/ort-wasm-simd-threaded.asyncify.mjs', location.origin).href,
-  wasm: new URL('/ort/ort-wasm-simd-threaded.asyncify.wasm', location.origin).href,
-};
+ort.env.wasm.wasmPaths = { ...ORT_WASM_PATHS };
 ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
 
 let session: ort.InferenceSession | null = null;

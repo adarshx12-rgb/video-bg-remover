@@ -1,17 +1,13 @@
 import { env, pipeline, RawImage, type BackgroundRemovalPipeline, type ProgressCallback, type ProgressInfo } from '@huggingface/transformers';
-import { BEN2_MODEL } from '../../config';
+import { BEN2_MODEL, ORT_WASM_PATHS } from '../../config';
 import { GpuBackendError } from './errors';
 import { installOrtShaderFix } from './ortShaderFix';
 import type { AdapterOptions, DownloadProgress, MatteResult, MattingAdapter } from './types';
 
-// Serve the ONNX Runtime WASM runtime from this app (copied by scripts/copy-ort-wasm.mjs)
-// instead of the default third-party CDN.
+// Load the ONNX Runtime WASM runtime from the pinned CDN copy (see ORT_WASM_PATHS).
 env.allowLocalModels = false;
 if (env.backends.onnx.wasm) {
-  env.backends.onnx.wasm.wasmPaths = {
-    mjs: new URL('/ort/ort-wasm-simd-threaded.asyncify.mjs', self.location.origin).href,
-    wasm: new URL('/ort/ort-wasm-simd-threaded.asyncify.wasm', self.location.origin).href,
-  };
+  env.backends.onnx.wasm.wasmPaths = { ...ORT_WASM_PATHS };
   env.backends.onnx.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
 }
 

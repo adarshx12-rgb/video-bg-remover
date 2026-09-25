@@ -1,14 +1,11 @@
 import * as ort from 'onnxruntime-web/webgpu';
-import { WITHOUTBG_MODEL } from '../../config';
+import { ORT_WASM_PATHS, WITHOUTBG_MODEL } from '../../config';
 import { cachedFetch, openModelCache } from './cachedFetch';
 import { GpuBackendError } from './errors';
 import type { AdapterOptions, DownloadProgress, MatteResult, MattingAdapter } from './types';
 
-// Serve the ONNX Runtime WASM runtime from this app (copied by scripts/copy-ort-wasm.mjs).
-ort.env.wasm.wasmPaths = {
-  mjs: new URL('/ort/ort-wasm-simd-threaded.asyncify.mjs', self.location.origin).href,
-  wasm: new URL('/ort/ort-wasm-simd-threaded.asyncify.wasm', self.location.origin).href,
-};
+// Load the ONNX Runtime WASM runtime from the pinned CDN copy (see ORT_WASM_PATHS).
+ort.env.wasm.wasmPaths = { ...ORT_WASM_PATHS };
 ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
 
 type Device = 'webgpu' | 'wasm';

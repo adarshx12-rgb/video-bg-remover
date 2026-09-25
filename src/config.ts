@@ -62,6 +62,20 @@ export const WITHOUTBG_MODEL = {
   cacheName: 'withoutbg-onnx-cfae4da',
 } as const;
 
+/**
+ * ONNX Runtime Web WASM runtime (used by withoutBG and BEN2), loaded from jsDelivr.
+ * The .wasm file is about 25.5 MiB, over Cloudflare's 25 MiB per-file limit, so it
+ * cannot be served from this site. jsDelivr sends CORS and CORP headers, so it loads
+ * under cross-origin isolation. The version must match the installed onnxruntime-web
+ * (pinned in package.json `overrides`); a unit test checks this.
+ */
+export const ORT_VERSION = '1.30.0';
+const ORT_CDN = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
+export const ORT_WASM_PATHS = {
+  mjs: `${ORT_CDN}ort-wasm-simd-threaded.asyncify.mjs`,
+  wasm: `${ORT_CDN}ort-wasm-simd-threaded.asyncify.wasm`,
+} as const;
+
 export const MODELS: Record<ModelId, ModelInfo> = {
   rvm: {
     id: 'rvm',

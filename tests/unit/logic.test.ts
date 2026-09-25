@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { computeOutputSize, rvmDownsampleRatio } from '../../src/lib/video/sizing';
 import { fixLayerNormMixedPrecision } from '../../src/lib/models/ortShaderFix';
 import { needsSoftwareDecode } from '../../src/lib/video/decoderWorkaround';
 import { packSize } from '../../src/lib/compositing/mattePack';
+import { ORT_VERSION, ORT_WASM_PATHS } from '../../src/config';
 
 describe('computeOutputSize', () => {
   it('keeps small videos unchanged (never upscales)', () => {
@@ -79,5 +81,13 @@ describe('packSize', () => {
   it('pads the side-by-side matte pack to multiples of 16', () => {
     expect(packSize(960, 540)).toEqual({ width: 1920, height: 544 });
     expect(packSize(1280, 720)).toEqual({ width: 2560, height: 720 });
+  });
+});
+
+describe('ORT_VERSION', () => {
+  it('matches the installed onnxruntime-web, so the CDN runtime fits the bundled JS', () => {
+    const installed = JSON.parse(readFileSync('node_modules/onnxruntime-web/package.json', 'utf8')).version;
+    expect(ORT_VERSION).toBe(installed);
+    expect(ORT_WASM_PATHS.wasm).toContain(`onnxruntime-web@${installed}/`);
   });
 });

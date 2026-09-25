@@ -5,13 +5,12 @@
   "type": "module",
   "description": "In-browser video background remover using RVM (people) and BEN2 (general subjects).",
   "scripts": {
-    "prepare-assets": "node scripts/copy-ort-wasm.mjs",
-    "dev": "npm run prepare-assets && astro dev",
-    "build": "npm run prepare-assets && npm run typecheck && astro build",
+    "dev": "astro dev",
+    "build": "npm run typecheck && astro build && node scripts/check-dist.mjs",
     "preview": "astro preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "harness": "npm run prepare-assets && vite --config vite.harness.config.ts",
+    "harness": "vite --config vite.harness.config.ts",
     "make-test-videos": "node scripts/make-test-videos.mjs",
     "e2e": "node tests/e2e/run-e2e.mjs"
   },

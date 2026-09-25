@@ -28,7 +28,7 @@ dependency keeps its own licence; they are **not** all GPL.
 | --- | --- | --- |
 | mediabunny | 1.59.1 | MPL-2.0 |
 | @huggingface/transformers | 4.3.0 | Apache-2.0 |
-| onnxruntime-web (direct, and via Transformers.js; WASM files copied to `public/ort`) | 1.30.0 | MIT |
+| onnxruntime-web (direct, and via Transformers.js; WASM runtime loaded from jsDelivr) | 1.30.0 | MIT |
 | @tensorflow/tfjs-core, -converter, -backend-webgl, -backend-webgpu | 4.22.0 | Apache-2.0 |
 | react, react-dom | 19.3.0 | MIT |
 | astro, @astrojs/react | 7.3.5 / 7.0.0 | MIT |
