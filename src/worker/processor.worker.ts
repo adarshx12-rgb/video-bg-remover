@@ -36,9 +36,10 @@ async function createAdapter(model: ModelId, backendOverride?: string): Promise<
       const { RvmAdapter } = await import('../lib/models/rvm');
       return new RvmAdapter({ backendOverride });
     }
-    case 'withoutbg': {
+    case 'withoutbg':
+    case 'withoutbg-small': {
       const { WithoutbgAdapter } = await import('../lib/models/withoutbg');
-      return new WithoutbgAdapter({ backendOverride });
+      return new WithoutbgAdapter({ backendOverride }, model);
     }
     case 'ben2': {
       const { Ben2Adapter } = await import('../lib/models/ben2');

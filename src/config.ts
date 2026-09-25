@@ -9,7 +9,7 @@ export const LIMITS = {
   maxOutputDimension: 1280,
 } as const;
 
-export type ModelId = 'rvm' | 'withoutbg' | 'ben2';
+export type ModelId = 'rvm' | 'withoutbg' | 'withoutbg-small' | 'ben2';
 
 export interface ModelInfo {
   id: ModelId;
@@ -22,6 +22,8 @@ export interface ModelInfo {
   sourceUrl: string;
   /** Extra attribution the licence requires to be shown, if any. */
   attribution?: string;
+  /** Set on a smaller-download variant of another model; the picker shows it as an option of that model. */
+  variantOf?: ModelId;
 }
 
 /**
@@ -63,6 +65,46 @@ export const WITHOUTBG_MODEL = {
 } as const;
 
 /**
+ * Where the compressed withoutBG files are hosted (Hugging Face, Cloudflare R2 or any
+ * CORS-enabled host), as a base URL ending in "/". Set PUBLIC_MODEL_MIRROR at build
+ * time; .env.development points it at the local model-files/ folder. When it is empty,
+ * the app uses the publisher's full-size file and offers no smaller download.
+ */
+export const MODEL_MIRROR: string = import.meta.env.PUBLIC_MODEL_MIRROR ?? '';
+
+export interface WithoutbgFile {
+  url: string;
+  sha256: string;
+  cacheName: string;
+  approxDownload: string;
+}
+
+/**
+ * Weight-only compressed copies of the same withoutBG model, made by
+ * scripts/model-compression/compress.py (compute stays float32):
+ * - fp16 (217 MB): output matched the full model to within 0.01/255 on average.
+ * - int8 (110 MB): about 0.05–0.33/255 average difference; at most 0.13% of pixels
+ *   changed foreground/background, mostly at ambiguous edges.
+ */
+export const WITHOUTBG_COMPRESSED = {
+  fp16: { file: 'withoutbg-open-weights-fp16w.onnx', sha256: 'ff64a826146600e3fb097f24f1147b031b149d9d6d0cd9ecadac8d9873c2cb65', approxDownload: 'about 217 MB' },
+  int8: { file: 'withoutbg-open-weights-int8w.onnx', sha256: '3826c9339a946fff7098723bfc1e2f199de5e041cb90bb0d8c3ea8d002bcc809', approxDownload: 'about 110 MB' },
+} as const;
+
+export function withoutbgFile(id: 'withoutbg' | 'withoutbg-small', mirror = MODEL_MIRROR): WithoutbgFile {
+  if (!mirror) {
+    return { url: WITHOUTBG_MODEL.url, sha256: WITHOUTBG_MODEL.sha256, cacheName: WITHOUTBG_MODEL.cacheName, approxDownload: 'about 455 MB' };
+  }
+  const variant = id === 'withoutbg-small' ? WITHOUTBG_COMPRESSED.int8 : WITHOUTBG_COMPRESSED.fp16;
+  return {
+    url: mirror + variant.file,
+    sha256: variant.sha256,
+    cacheName: `withoutbg-onnx-${variant.sha256.slice(0, 8)}`,
+    approxDownload: variant.approxDownload,
+  };
+}
+
+/**
  * ONNX Runtime Web WASM runtime (used by withoutBG and BEN2), loaded from jsDelivr.
  * The .wasm file is about 25.5 MiB, over Cloudflare's 25 MiB per-file limit, so it
  * cannot be served from this site. jsDelivr sends CORS and CORP headers, so it loads
@@ -94,11 +136,24 @@ export const MODELS: Record<ModelId, ModelInfo> = {
     shortLabel: 'withoutBG open weights',
     description:
       'For people, animals and objects. Each frame is processed on its own. Hair and fur edges are a little softer than Any subject, fine detail.',
-    approxDownload: 'about 455 MB',
+    approxDownload: withoutbgFile('withoutbg').approxDownload,
     licence: 'Apache-2.0, with DINOv3 License terms for its backbone',
     licenceUrl: 'https://withoutbg.com/open-model/license',
     sourceUrl: 'https://github.com/withoutbg/withoutbg-python',
     attribution: 'Built with DINOv3',
+  },
+  'withoutbg-small': {
+    id: 'withoutbg-small',
+    name: 'Any subject',
+    shortLabel: 'withoutBG open weights, 8-bit',
+    description:
+      'Same model with its weights stored in 8 bits: half the download. Edges can differ very slightly on some frames.',
+    approxDownload: withoutbgFile('withoutbg-small').approxDownload,
+    licence: 'Apache-2.0, with DINOv3 License terms for its backbone',
+    licenceUrl: 'https://withoutbg.com/open-model/license',
+    sourceUrl: 'https://github.com/withoutbg/withoutbg-python',
+    attribution: 'Built with DINOv3',
+    variantOf: 'withoutbg',
   },
   ben2: {
     id: 'ben2',

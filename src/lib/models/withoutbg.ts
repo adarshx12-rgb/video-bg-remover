@@ -1,5 +1,5 @@
 import * as ort from 'onnxruntime-web/webgpu';
-import { ORT_WASM_PATHS, WITHOUTBG_MODEL } from '../../config';
+import { ORT_WASM_PATHS, WITHOUTBG_MODEL, withoutbgFile } from '../../config';
 import { cachedFetch, openModelCache } from './cachedFetch';
 import { GpuBackendError } from './errors';
 import type { AdapterOptions, DownloadProgress, MatteResult, MattingAdapter } from './types';
@@ -17,7 +17,7 @@ type Device = 'webgpu' | 'wasm';
  * area and scaled back to the frame size. Frames are independent (no state).
  */
 export class WithoutbgAdapter implements MattingAdapter {
-  readonly id = 'withoutbg' as const;
+  readonly id: 'withoutbg' | 'withoutbg-small';
   readonly isTemporal = false;
   readonly backendNote = null;
   backend = 'not loaded';
@@ -31,29 +31,38 @@ export class WithoutbgAdapter implements MattingAdapter {
   private maskCanvas: OffscreenCanvas | null = null;
   private readonly options: AdapterOptions;
 
-  constructor(options: AdapterOptions = {}) {
+  constructor(options: AdapterOptions = {}, id: 'withoutbg' | 'withoutbg-small' = 'withoutbg') {
     this.options = options;
+    this.id = id;
   }
 
   async load(onProgress: (progress: DownloadProgress) => void): Promise<void> {
     const device = (this.options.backendOverride as Device | undefined) ?? (await pickDevice());
-    const cache = await openModelCache(WITHOUTBG_MODEL.cacheName, 'withoutbg-onnx-');
+    const file = withoutbgFile(this.id);
+    const cache = await openModelCache(file.cacheName, 'withoutbg-onnx-');
     let fromCache = false;
-    let bytes: ArrayBuffer | null = await cachedFetch(WITHOUTBG_MODEL.url, cache, (p) => {
+    let bytes: ArrayBuffer | null = await cachedFetch(file.url, cache, (p) => {
       fromCache = p.fromCache;
       onProgress({ loaded: p.loaded, total: p.total, initialising: false, fromCache: p.fromCache });
     });
     onProgress({ loaded: bytes.byteLength, total: bytes.byteLength, initialising: true, fromCache });
 
-    // Integrity check against the publisher's SHA-256 (also catches a truncated cache entry).
+    // Integrity check against the pinned SHA-256 (also catches a truncated cache entry).
     const digest = toHex(await crypto.subtle.digest('SHA-256', bytes));
-    if (digest !== WITHOUTBG_MODEL.sha256) {
-      await cache?.delete(WITHOUTBG_MODEL.url).catch(() => undefined);
+    if (digest !== file.sha256) {
+      await cache?.delete(file.url).catch(() => undefined);
       throw new Error('The downloaded model file is incomplete or damaged. Select Try again to download it again.');
     }
 
     try {
-      this.session = await ort.InferenceSession.create(new Uint8Array(bytes), { executionProviders: [device], graphOptimizationLevel: 'all' });
+      this.session = await ort.InferenceSession.create(new Uint8Array(bytes), {
+        executionProviders: [device],
+        graphOptimizationLevel: 'all',
+        // The 8-bit file stores weights as int8 + DequantizeLinear. Without this, ONNX
+        // Runtime keeps those nodes for QDQ fusion and dequantizes every frame (about
+        // 35% slower on CPU); with it they are constant-folded once at load.
+        extra: { session: { disable_quant_qdq: '1' } },
+      });
       bytes = null; // release the downloaded copy; the session owns the weights now
       await this.warmUp();
     } catch (error) {

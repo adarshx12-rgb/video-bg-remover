@@ -170,6 +170,34 @@ the export still succeeds; only this shortcut is unavailable.
 | withoutBG | `withoutbg-open-weights.onnx` (~455 MB), SHA-256 checked after download | `huggingface.co`, pinned to revision `cfae4da` | Cache API, cache `withoutbg-onnx-cfae4da` |
 | BEN2 | `config.json`, `preprocessor_config.json`, `onnx/model_fp16.onnx` (~219 MB) | `huggingface.co`, pinned to revision `c552aa8` | Cache API, Transformers.js cache `transformers-cache` |
 
+### Smaller withoutBG downloads
+
+When `PUBLIC_MODEL_MIRROR` is set, "Any subject" downloads compressed copies of the same
+withoutBG model instead of the 455 MB original, and offers a "Smaller download" checkbox:
+
+| File | Size | Difference from the full model (8 test frames) |
+| --- | --- | --- |
+| `withoutbg-open-weights-fp16w.onnx` (standard) | ~217 MB | ≤ 0.01/255 average; visually identical |
+| `withoutbg-open-weights-int8w.onnx` (Smaller download) | ~110 MB | 0.01–0.33/255 average; at most 0.13% of pixels switch foreground/background, mostly at ambiguous edges |
+
+Both are weight-only compression: weights are stored as float16 or per-channel int8 and
+expanded to float32 when the model loads, so computation is unchanged and speed matches
+the full model. They are made from the pinned original by
+`scripts/model-compression/compress.py` (`evaluate.py` produces the comparison above).
+On browsers that report a slow connection or data saver, the Smaller download is ticked
+by default and a note suggests the 4 MB People model.
+
+- **Development:** `.env.development` sets `PUBLIC_MODEL_MIRROR=/model-files/`, and the
+  dev server serves the git-ignored `model-files/` folder. Put the two files there. Restart
+  `npm run dev` after changing `.env` files.
+- **Production:** the files are over Cloudflare's 25 MiB limit, so upload them elsewhere
+  with CORS enabled, for example a Hugging Face model repo, then set
+  `PUBLIC_MODEL_MIRROR` in the Cloudflare build settings to the base URL ending in `/`
+  (for a Hugging Face repo: `https://huggingface.co/<user>/<repo>/resolve/main/`). The
+  files are a modified redistribution of the withoutBG model: include the withoutBG
+  licence, the DINOv3 License and a "Built with DINOv3" notice with them. Without
+  `PUBLIC_MODEL_MIRROR`, the site uses the original 455 MB file and hides the checkbox.
+
 - Downloads start only when you first preview or process with that model.
 - The progress bar shows real byte counts when the server reports sizes, and an
   indeterminate bar otherwise.
@@ -206,8 +234,11 @@ the export still succeeds; only this shortcut is unavailable.
 - **Speed depends heavily on the GPU.** Measured on the development machine (Intel UHD
   Gen9 integrated GPU, Chrome 153, Windows 11):
   - People (RVM), 1280×720, WebGPU: about **0.5 s per frame**; WebGL: about 1.4 s per frame.
-  - Any subject (withoutBG), WebGPU: about **4.2–4.5 s per frame** (ONNX Runtime reported
-    that some nodes run on the CPU).
+  - Any subject (withoutBG), WebGPU: about **4.7 s per frame** with the publisher's file,
+    whose 12 attention `FusedMatMul` nodes have no WebGPU kernel and run on the CPU; about
+    **4.1–4.4 s** with the compressed files, which replace them with standard ops. A GPU
+    profile of one frame: Gemm 38%, MatMul 29%, Conv 20%, so the rest is the model's own
+    compute. fp16 computation (tried, with shader-f16) was no faster on this GPU.
   - General subjects (BEN2), WebGPU: about **30–40 s per frame**; WebAssembly: about 47 s
     per frame. A 30-second video at 30 fps would take hours. Use a lower frame rate and
     short clips, or the People model.

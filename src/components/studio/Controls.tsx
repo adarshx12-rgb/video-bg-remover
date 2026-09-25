@@ -1,5 +1,5 @@
-import { useRef } from 'react';
-import { EDGE_SOFTNESS_MAX, MODELS, type ModelId } from '../../config';
+import { Fragment, useRef } from 'react';
+import { EDGE_SOFTNESS_MAX, MODEL_MIRROR, MODELS, type ModelId } from '../../config';
 import { FORMAT_OPTIONS, type OutputFormatId, type OutputFormatOption } from '../../lib/capabilities';
 
 export type BackgroundChoice =
@@ -19,8 +19,15 @@ const PRESETS = [
   { preset: 'green', color: '#00b140', label: 'Green' },
 ] as const;
 
-export function ModelPicker(props: { value: ModelId; onChange(id: ModelId): void; status: ModelStatus; disabled: boolean }) {
-  const { value, onChange, status, disabled } = props;
+export function ModelPicker(props: {
+  value: ModelId;
+  onChange(id: ModelId): void;
+  status: ModelStatus;
+  disabled: boolean;
+  slowConnection: boolean;
+}) {
+  const { value, onChange, status, disabled, slowConnection } = props;
+  const selectedBase = MODELS[value].variantOf ?? value;
   return (
     <fieldset className="step" disabled={disabled}>
       <legend className="step-title">
@@ -28,28 +35,55 @@ export function ModelPicker(props: { value: ModelId; onChange(id: ModelId): void
         What is in your video?
       </legend>
       <div className="model-options">
-        {(Object.keys(MODELS) as ModelId[]).map((id) => {
-          const model = MODELS[id];
-          const selected = value === id;
-          return (
-            <label key={id} className={`model-option${selected ? ' is-selected' : ''}`}>
-              <input type="radio" name="model" value={id} checked={selected} onChange={() => onChange(id)} />
-              <span className="model-name">{model.name}</span>
-              <span className="model-description">{model.description}</span>
-              <span className="model-meta">
-                {model.shortLabel}, {model.approxDownload} download
-                {model.attribution && <>. {model.attribution}</>}
-              </span>
-              {selected && status.status === 'ready' && (
-                <span className="model-ready">Ready, running on {status.backend}</span>
-              )}
-            </label>
-          );
-        })}
+        {(Object.keys(MODELS) as ModelId[])
+          .filter((id) => !MODELS[id].variantOf)
+          .map((id) => {
+            const selected = selectedBase === id;
+            // Show the file that will actually be downloaded: the smaller variant when it is chosen.
+            const model = selected ? MODELS[value] : MODELS[id];
+            const small = smallVariantOf(id);
+            return (
+              <Fragment key={id}>
+                <label className={`model-option${selected ? ' is-selected' : ''}`}>
+                  <input type="radio" name="model" value={id} checked={selected} onChange={() => onChange(small && value === small ? small : id)} />
+                  <span className="model-name">{MODELS[id].name}</span>
+                  <span className="model-description">{MODELS[id].description}</span>
+                  <span className="model-meta">
+                    {model.shortLabel}, {model.approxDownload} download
+                    {model.attribution && <>. {model.attribution}</>}
+                  </span>
+                  {selected && status.status === 'ready' && (
+                    <span className="model-ready">Ready, running on {status.backend}</span>
+                  )}
+                </label>
+                {selected && small && (
+                  <label className="model-variant">
+                    <input type="checkbox" checked={value === small} onChange={(e) => onChange(e.target.checked ? small : id)} />
+                    <span>
+                      Smaller download ({MODELS[small].approxDownload.replace('about ', '')} instead of{' '}
+                      {MODELS[id].approxDownload.replace('about ', '')}). Edges can differ very slightly.
+                    </span>
+                  </label>
+                )}
+              </Fragment>
+            );
+          })}
       </div>
+      {slowConnection && selectedBase !== 'rvm' && (
+        <p className="inline-note">
+          Your connection looks slow. This model is a large one-time download ({MODELS[value].approxDownload}). For videos
+          of people, {MODELS.rvm.name} needs only {MODELS.rvm.approxDownload.replace('about ', '')}.
+        </p>
+      )}
       {status.status === 'ready' && status.backendNote && <p className="inline-note">{status.backendNote}</p>}
     </fieldset>
   );
+}
+
+/** The smaller-download variant of a model, if one exists and its files are hosted. */
+export function smallVariantOf(id: ModelId): ModelId | null {
+  if (!MODEL_MIRROR) return null;
+  return (Object.keys(MODELS) as ModelId[]).find((v) => MODELS[v].variantOf === id) ?? null;
 }
 
 export function BackgroundPicker(props: {

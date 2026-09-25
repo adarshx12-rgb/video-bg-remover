@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MODELS, type ModelId } from '../config';
-import { detectCapabilities, FORMAT_OPTIONS, type Capabilities, type OutputFormatId } from '../lib/capabilities';
+import { connectionLooksSlow, detectCapabilities, FORMAT_OPTIONS, type Capabilities, type OutputFormatId } from '../lib/capabilities';
 import { CancelledError, ProcessorClient } from '../lib/processorClient';
 import { probeVideo, type VideoMetadata } from '../lib/video/probe';
 import { formatBytes, formatDuration } from '../lib/video/sizing';
 import type { BackgroundMessage, JobSettings } from '../worker/protocol';
-import { BackgroundPicker, ModelPicker, OutputPicker, formatsFor, type BackgroundChoice, type ModelStatus } from './studio/Controls';
+import { BackgroundPicker, ModelPicker, OutputPicker, formatsFor, smallVariantOf, type BackgroundChoice, type ModelStatus } from './studio/Controls';
 import { toFriendlyError, type FriendlyError } from './studio/errors';
 import { Stage, type StageView } from './studio/Stage';
 import { StatusPanel, formatEta, type JobState } from './studio/StatusPanel';
@@ -40,6 +40,7 @@ export default function Studio() {
   const [probing, setProbing] = useState(false);
 
   const [modelId, setModelId] = useState<ModelId>('rvm');
+  const [slowConnection] = useState(connectionLooksSlow);
   const [model, setModel] = useState<ModelStatus>({ status: 'idle' });
   const [background, setBackground] = useState<BackgroundChoice>({ kind: 'color', preset: 'white', color: '#ffffff' });
   const [format, setFormat] = useState<OutputFormatId>('mp4');
@@ -165,14 +166,18 @@ export default function Studio() {
   }, [resetResult, stopActive]);
 
   const changeModel = useCallback(
-    (id: ModelId) => {
-      if (id === modelIdRef.current) return;
+    (requested: ModelId) => {
+      const current = modelIdRef.current;
+      const baseOf = (m: ModelId) => MODELS[m].variantOf ?? m;
+      // On a slow connection, switching to a model starts with its smaller download.
+      const id = slowConnection && baseOf(requested) !== baseOf(current) ? (smallVariantOf(requested) ?? requested) : requested;
+      if (id === current) return;
       // Release the previous model (its worker, GPU memory and tensors) right away.
       client.unload();
       setModel({ status: 'idle' });
       setModelId(id);
     },
-    [client],
+    [client, slowConnection],
   );
 
   /** Load the selected model if needed. Returns false if loading failed or was abandoned. */
@@ -467,7 +472,7 @@ export default function Studio() {
         </div>
 
         <aside className="rail" aria-label="Settings">
-          <ModelPicker value={modelId} onChange={changeModel} status={model} disabled={locked} />
+          <ModelPicker value={modelId} onChange={changeModel} status={model} disabled={locked} slowConnection={slowConnection} />
           <BackgroundPicker
             value={background}
             onChange={setBackground}

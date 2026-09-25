@@ -4,7 +4,7 @@ import { computeOutputSize, rvmDownsampleRatio } from '../../src/lib/video/sizin
 import { fixLayerNormMixedPrecision } from '../../src/lib/models/ortShaderFix';
 import { avcCodecFromDescription, needsSoftwareDecode } from '../../src/lib/video/decoderWorkaround';
 import { packSize } from '../../src/lib/compositing/mattePack';
-import { ORT_VERSION, ORT_WASM_PATHS } from '../../src/config';
+import { ORT_VERSION, ORT_WASM_PATHS, WITHOUTBG_MODEL, withoutbgFile } from '../../src/config';
 
 describe('computeOutputSize', () => {
   it('keeps small videos unchanged (never upscales)', () => {
@@ -106,5 +106,20 @@ describe('avcCodecFromDescription', () => {
     expect(avcCodecFromDescription('vp09.00.10.08', telegram)).toBe('vp09.00.10.08');
     expect(avcCodecFromDescription('avc1.640004', undefined)).toBe('avc1.640004');
     expect(avcCodecFromDescription('avc1.640004', new Uint8Array([1, 2, 3]))).toBe('avc1.640004');
+  });
+});
+
+describe('withoutbgFile', () => {
+  it('uses the publisher file for both options when no mirror is configured', () => {
+    expect(withoutbgFile('withoutbg', '').url).toBe(WITHOUTBG_MODEL.url);
+    expect(withoutbgFile('withoutbg-small', '').sha256).toBe(WITHOUTBG_MODEL.sha256);
+  });
+  it('uses the fp16 file as standard and the int8 file as the smaller download from a mirror', () => {
+    const standard = withoutbgFile('withoutbg', 'https://example.com/m/');
+    const small = withoutbgFile('withoutbg-small', 'https://example.com/m/');
+    expect(standard.url).toBe('https://example.com/m/withoutbg-open-weights-fp16w.onnx');
+    expect(small.url).toBe('https://example.com/m/withoutbg-open-weights-int8w.onnx');
+    expect(standard.cacheName).not.toBe(small.cacheName);
+    expect(standard.sha256).not.toBe(small.sha256);
   });
 });

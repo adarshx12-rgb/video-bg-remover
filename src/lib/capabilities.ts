@@ -65,6 +65,16 @@ export const FORMAT_OPTIONS: Record<OutputFormatId, OutputFormatOption> = {
   },
 };
 
+/**
+ * True when the browser reports a slow connection or data saver. Only Chromium
+ * browsers expose this (Network Information API); elsewhere it returns false.
+ */
+export function connectionLooksSlow(): boolean {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  if (!connection) return false;
+  return connection.saveData === true || ['slow-2g', '2g', '3g'].includes(connection.effectiveType ?? '');
+}
+
 export async function detectCapabilities(): Promise<Capabilities> {
   const notes: string[] = [];
   const webCodecs = typeof VideoEncoder !== 'undefined' && typeof VideoDecoder !== 'undefined' && typeof AudioEncoder !== 'undefined';
