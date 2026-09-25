@@ -6,3 +6,4 @@ test-results
 .astro
 tsconfig.tsbuildinfo
 model-files
+__pycache__
